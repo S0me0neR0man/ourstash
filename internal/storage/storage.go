@@ -22,6 +22,8 @@ var (
 
 // Storager interface key-value storage
 type Storager interface {
+	Get(UnitIdType, FieldIdType) (any, bool)
+	Put(UnitIdType, any) error
 }
 
 // SyncMapStorage the in-memory NoSQL key-value tread safe storage.
@@ -41,7 +43,7 @@ func NewStorage() (*SyncMapStorage, error) {
 	return &s, nil
 }
 
-func (s *SyncMapStorage) New(rec *Record) {
+func (s *SyncMapStorage) New(rec *PutChain) {
 	recordId := s.lastRecId.Add(1)
 	rec.put(recordId)
 }

@@ -11,6 +11,7 @@ const ()
 type SectionIdType byte
 type RecordIdType uint64
 type UnitIdType uint16
+type FieldIdType uint16
 
 // Key the synthetic unique key. All digit stored in BigEndian notation.
 //
@@ -20,11 +21,9 @@ type UnitIdType uint16
 //
 // [9:11] the unit id uint16
 //
-// [11:13] the field name id uint16
+// [11:13] the field id uint16
 //
-// [13:17] block extra data
-//
-// [17:21] reserved
+// [13:21] reserved
 //
 // record id = 0 reserved in all section
 //  Section RecordId UnitId FieldId
@@ -48,11 +47,10 @@ func NewBlockKey(section SectionIdType, record RecordIdType, unit UnitIdType) *K
 
 // String is Stringer implementation
 func (k Key) String() string {
-	return fmt.Sprintf("%s %s %s %s %s",
+	return fmt.Sprintf("%s %s %s %s",
 		hex.EncodeToString(k[0:1]),
 		hex.EncodeToString(k[1:9]),
 		hex.EncodeToString(k[9:11]),
 		hex.EncodeToString(k[11:13]),
-		hex.EncodeToString(k[13:17]),
 	)
 }

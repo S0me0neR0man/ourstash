@@ -1,6 +1,9 @@
 package storage
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 type SysUnit struct {
 	user      string
@@ -10,8 +13,17 @@ type SysUnit struct {
 	lastMod   time.Time
 }
 
+func (s *SysUnit) PutMiddleware(handler PutHandler) PutHandler {
+	//TODO implement me
+	panic("implement me")
+}
+
 func NewSysUnit() (*SysUnit, error) {
 	return &SysUnit{}, nil
+}
+
+func (s *SysUnit) String() string {
+	return fmt.Sprintf("%s %d %d %v %v", s.user, s.sectionId, s.recordId, s.isDeleted, s.lastMod)
 }
 
 func (s *SysUnit) User() string {
@@ -38,16 +50,7 @@ func (s *SysUnit) Name() string {
 	return sysUnitName
 }
 
-func (s *SysUnit) Middleware(handler PutHandler) PutHandler {
+func (s *SysUnit) Put(storager Storager) error {
 	//TODO implement me
 	panic("implement me")
-}
-
-func (s *SysUnit) PutHandler(next PutHandler) PutHandler {
-	return PutHandlerFunc(func(k *Key) {
-		if next == nil {
-			return
-		}
-		next.Put(k)
-	})
 }

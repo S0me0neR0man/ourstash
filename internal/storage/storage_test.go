@@ -18,9 +18,11 @@ func TestNewStorage(t *testing.T) {
 	require.NotNil(t, tags)
 	log.Println(tags)
 
-	rec := NewRecord()
-	rec.UseInPut(tags.PutHandler)
-	store.New(rec)
+	chainTo, err := NewPutChain()
+	require.NoError(t, err)
+	require.NotNil(t, chainTo)
+	chainTo.Use(tags.PutHandle)
+	store.New(chainTo)
 
 	//t.Run("new storage", func(t *testing.T) {
 	//	}
