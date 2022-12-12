@@ -1,8 +1,10 @@
-package storage
+package objects
 
 import (
 	"fmt"
 	"log"
+
+	"ourstash/internal/storage"
 )
 
 type TagsUnit struct {
@@ -21,8 +23,8 @@ func (t *TagsUnit) String() string {
 	return fmt.Sprintf("%v", t.Tags)
 }
 
-func (t *TagsUnit) PutHandle(next PutHandler) PutHandler {
-	return PutHandlerFunc(func(store Storager) error {
+func (t *TagsUnit) PutMiddleware(next storage.PutHandler) storage.PutHandler {
+	return storage.PutHandlerFunc(func(store storage.Storager) error {
 		log.Println("tagsunit put handler")
 		if next == nil {
 			return nil
@@ -31,12 +33,3 @@ func (t *TagsUnit) PutHandle(next PutHandler) PutHandler {
 	})
 }
 
-//func (t *TagsUnit) PutHandler(next PutHandler) PutHandler {
-//	return PutHandlerFunc(func(store Storager) error {
-//		log.Println("tagsunit put handler")
-//		if next == nil {
-//			return nil
-//		}
-//		return next.Put(store)
-//	})
-//}

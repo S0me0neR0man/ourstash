@@ -3,10 +3,13 @@ package storage
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 )
 
-const ()
+const (
+	keyLength = 32
+)
 
 type SectionIdType byte
 type RecordIdType uint64
@@ -23,26 +26,25 @@ type FieldIdType uint16
 //
 // [11:13] the field id uint16
 //
-// [13:21] reserved
-//
-// record id = 0 reserved in all section
-//  Section RecordId UnitId FieldId
-//  ------0 -------0 -----0 ------0 next record id for section 0
-//  ------1 -------0 -----0 ------0 next record id for section 1
+// [13:32] reserved
+type Key [keyLength]byte
 
-type Key [20]byte
-
-type Iterator interface {
-	Next() (*Key, error)
+// NewKey make new block key
+func NewKey(sec SectionIdType, rec RecordIdType, unit UnitIdType, field FieldIdType) Key {
+	var k [keyLength]byte
+	k[0] = byte(sec)
+	binary.BigEndian.PutUint64(k[1:9], uint64(rec))
+	binary.BigEndian.PutUint16(k[9:11], uint16(unit))
+	binary.BigEndian.PutUint16(k[11:13], uint16(field))
+	return k
 }
 
-// NewBlockKey make new block key
-func NewBlockKey(section SectionIdType, record RecordIdType, unit UnitIdType) *Key {
-	k := new(Key)
-	k[0] = byte(section)
-	binary.BigEndian.PutUint64(k[1:9], uint64(record))
-	binary.BigEndian.PutUint16(k[9:11], uint16(unit))
-	return k
+func NewKeyFromBytes(b []byte) (Key, error) {
+	var k [keyLength]byte
+	if len(b) != keyLength {
+		return k, errors.New("wrong length")
+	}
+	return k, nil
 }
 
 // String is Stringer implementation
@@ -54,3 +56,20 @@ func (k Key) String() string {
 		hex.EncodeToString(k[11:13]),
 	)
 }
+
+func (k Key) Section() SectionIdType {
+	return SectionIdType(k[0])
+}
+
+func (k Key) Record() RecordIdType {
+	return RecordIdType(binary.BigEndian.Uint16(k[1:9]))
+}
+
+func (k Key) Unit() UnitIdType {
+	return UnitIdType(binary.BigEndian.Uint64(k[9:11]))
+}
+
+func (k Key) Field() FieldIdType {
+	return FieldIdType(binary.BigEndian.Uint64(k[11:13]))
+}
+

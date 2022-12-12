@@ -19,8 +19,8 @@ func (f PutHandlerFunc) Put(store Storager) error {
 // MiddlewarePutFunc is a function which receives an PutHandler and returns another PutHandler
 type MiddlewarePutFunc func(PutHandler) PutHandler
 
-// PutMiddlewarer interface is anything which implements a MiddlewarePutFunc named Middleware
-type PutMiddlewarer interface {
+// putMiddlewarer interface is anything which implements a MiddlewarePutFunc named Middleware
+type putMiddlewarer interface {
 	PutMiddleware(PutHandler) PutHandler
 }
 
@@ -29,9 +29,9 @@ func (mw MiddlewarePutFunc) PutMiddleware(h PutHandler) PutHandler {
 	return mw(h)
 }
 
-// PutChain use pattern chain of responsibility to save data
+// PutChain use pattern chain of responsibility to save m
 type PutChain struct {
-	putMiddlewares []PutMiddlewarer
+	putMiddlewares []putMiddlewarer
 }
 
 // NewPutChain make new chain
@@ -41,22 +41,26 @@ func NewPutChain() (*PutChain, error) {
 		return nil, err
 	}
 
-	mw := make([]PutMiddlewarer, 1)
-	mw[0] = MiddlewarePutFunc(func(next PutHandler) PutHandler {
-		return sys
-	})
-	return &PutChain{putMiddlewares: mw}, nil
+	auth, err := NewAuthUnit()
+	if err != nil {
+		return nil, err
+	}
+
+	p := PutChain{}
+	p.Attach(sys.PutMiddleware, auth.PutMiddleware)
+
+	return &p, nil
 }
 
-// Use appends a MiddlewarePutFunc to the put chain
-func (p *PutChain) Use(mwf ...MiddlewarePutFunc) *PutChain {
+// Attach appends a MiddlewarePutFunc to the put chain
+func (p *PutChain) Attach(mwf ...MiddlewarePutFunc) *PutChain {
 	for _, fn := range mwf {
 		p.putMiddlewares = append(p.putMiddlewares, fn)
 	}
 	return p
 }
 
-func (p *PutChain) put(id uint64) error {
+func (p *PutChain) put(store Storager) error {
 	if len(p.putMiddlewares) == 0 {
 		return nil
 	}
@@ -67,5 +71,5 @@ func (p *PutChain) put(id uint64) error {
 		h = p.putMiddlewares[i].PutMiddleware(h)
 	}
 
-	return h.Put(nil)
+	return h.Put(store)
 }
