@@ -9,6 +9,10 @@ import (
 
 const (
 	keyLength = 32
+
+	KeyLessThan int = -1
+	KeyEqual    int = 0
+	KeyMoreThan int = 1
 )
 
 type SectionIdType byte
@@ -73,3 +77,30 @@ func (k Key) Field() FieldIdType {
 	return FieldIdType(binary.BigEndian.Uint64(k[11:13]))
 }
 
+func (k Key) Compare(other Key) int {
+	if k.Section() < other.Section() {
+		return KeyLessThan
+	}
+	if k.Section() > other.Section() {
+		return KeyMoreThan
+	}
+	if k.Record() < other.Record() {
+		return KeyLessThan
+	}
+	if k.Record() > other.Record() {
+		return KeyMoreThan
+	}
+	if k.Unit() < other.Unit() {
+		return KeyLessThan
+	}
+	if k.Unit() > other.Unit() {
+		return KeyMoreThan
+	}
+	if k.Field() < other.Field() {
+		return KeyLessThan
+	}
+	if k.Field() > other.Field() {
+		return KeyMoreThan
+	}
+	return KeyEqual
+}
