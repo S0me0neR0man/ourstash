@@ -2,7 +2,7 @@ package storage
 
 // Iterator holding the iterator's state
 type Iterator struct {
-	tree        *redBlackTree
+	tree        *RedBlackTree
 	currentNode *redBlackNode
 	pos         position
 }
@@ -14,12 +14,12 @@ const (
 )
 
 // Iterator returns a iterator
-func (t *redBlackTree) Iterator() Iterator {
+func (t *RedBlackTree) Iterator() Iterator {
 	return Iterator{tree: t, currentNode: nil, pos: begin}
 }
 
 // IteratorAt returns a iterator
-func (t *redBlackTree) IteratorAt(node *redBlackNode) Iterator {
+func (t *RedBlackTree) IteratorAt(node *redBlackNode) Iterator {
 	return Iterator{tree: t, currentNode: node, pos: onmyway}
 }
 
@@ -103,71 +103,35 @@ func (it *Iterator) Prev() bool {
 }
 
 // Key returns the current element's key.
-// Does not modify the state of the iterator.
 func (it *Iterator) Key() Key {
 	return it.currentNode.key
 }
 
-// redBlackNode returns the current element's currentNode.
-// Does not modify the state of the iterator.
+// Node returns the current element's currentNode.
 func (it *Iterator) Node() *redBlackNode {
 	return it.currentNode
 }
 
-// Begin resets the iterator to its initial state (one-before-first)
-// Call Next() to fetch the first element if any.
+// Begin resets the iterator to one-before-first
 func (it *Iterator) Begin() {
 	it.currentNode = nil
 	it.pos = begin
 }
 
-// End moves the iterator past the last element (one-past-the-end).
-// Call Prev() to fetch the last element if any.
+// End moves the iterator to one-past-the-end
 func (it *Iterator) End() {
 	it.currentNode = nil
 	it.pos = end
 }
 
-// First moves the iterator to the first element and returns true if there was a first element in the container.
-// If First() returns true, then first element's key and value can be retrieved by Key() and Value().
-// Modifies the state of the iterator
+// First moves the iterator to the first element
 func (it *Iterator) First() bool {
 	it.Begin()
 	return it.Next()
 }
 
-// Last moves the iterator to the last element and returns true if there was a last element in the container.
-// If Last() returns true, then last element's key and value can be retrieved by Key() and Value().
-// Modifies the state of the iterator.
+// Last moves the iterator to the last element
 func (it *Iterator) Last() bool {
 	it.End()
 	return it.Prev()
-}
-
-// NextTo moves the iterator to the next element from current pos that satisfies the condition given by the
-// passed function, and returns true if there was a next element in the container.
-// If NextTo() returns true, then next element's key and value can be retrieved by Key() and Value().
-// Modifies the state of the iterator.
-func (it *Iterator) NextTo(f func(key interface{}, value interface{}) bool) bool {
-	for it.Next() {
-		key, value := it.Key(), it.Value()
-		if f(key, value) {
-			return true
-		}
-	}
-	return false
-}
-
-// PrevTo moves the iterator to the previous element from current pos that satisfies the condition given by the
-// passed function, and returns true if there was a next element in the container.
-// If PrevTo() returns true, then next element's key and value can be retrieved by Key() and Value().
-// Modifies the state of the iterator.
-func (it *Iterator) PrevTo(f func(key interface{}, value interface{}) bool) bool {
-	for it.Prev() {
-		key, value := it.Key(), it.Value()
-		if f(key, value) {
-			return true
-		}
-	}
-	return false
 }

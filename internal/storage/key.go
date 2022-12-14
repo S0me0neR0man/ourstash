@@ -66,15 +66,15 @@ func (k Key) Section() SectionIdType {
 }
 
 func (k Key) Record() RecordIdType {
-	return RecordIdType(binary.BigEndian.Uint16(k[1:9]))
+	return RecordIdType(binary.BigEndian.Uint64(k[1:9]))
 }
 
 func (k Key) Unit() UnitIdType {
-	return UnitIdType(binary.BigEndian.Uint64(k[9:11]))
+	return UnitIdType(binary.BigEndian.Uint16(k[9:11]))
 }
 
 func (k Key) Field() FieldIdType {
-	return FieldIdType(binary.BigEndian.Uint64(k[11:13]))
+	return FieldIdType(binary.BigEndian.Uint16(k[11:13]))
 }
 
 func (k Key) Compare(other Key) int {
