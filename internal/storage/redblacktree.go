@@ -33,38 +33,35 @@ func NewRedBlackTree() *RedBlackTree {
 
 // Put inserts key into the tree.
 func (t *RedBlackTree) Put(key Key) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	if t.root == nil {
-		t.mu.Lock()
 		t.root = &redBlackNode{key: key, color: black}
 		t.size++
-		t.mu.Unlock()
 		return
 	}
 
 	curNode := t.root
-	for true {
+	for {
 		switch key.Compare(curNode.key) {
 		case KeyEqual:
 			return
 		case KeyLessThan:
 			if curNode.left == nil {
-				t.mu.Lock()
 				curNode.left = &redBlackNode{key: key, color: red}
-				t.insertCase1(curNode.left)
 				curNode.left.parent = curNode
+				t.insertCase1(curNode.left)
 				t.size++
-				t.mu.Unlock()
 				return
 			}
 			curNode = curNode.left
 		case KeyMoreThan:
 			if curNode.right == nil {
-				t.mu.Lock()
 				curNode.right = &redBlackNode{key: key, color: red}
 				curNode.right.parent = curNode
 				t.insertCase1(curNode.right)
 				t.size++
-				t.mu.Unlock()
 				return
 			}
 			curNode = curNode.right
@@ -74,18 +71,21 @@ func (t *RedBlackTree) Put(key Key) {
 
 // GetNode searches the currentNode in the tree, nil not found
 func (t *RedBlackTree) GetNode(key Key) *redBlackNode {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	return t.lookup(key)
 }
 
 // Remove the currentNode from the tree
 func (t *RedBlackTree) Remove(key Key) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	delNode := t.lookup(key)
 	if delNode == nil {
 		return
 	}
-
-	t.mu.Lock()
-	defer t.mu.Unlock()
 
 	if delNode.left != nil && delNode.right != nil {
 		replacementNode := delNode.left.maximumNode()
@@ -113,116 +113,62 @@ func (t *RedBlackTree) Remove(key Key) {
 	t.size--
 }
 
-// IsEmpty returns true if tree is empty
-func (t *RedBlackTree) IsEmpty() bool {
-	return t.size == 0
-}
-
 // Size returns number of nodes
 func (t *RedBlackTree) Size() int {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	return t.size
 }
 
 // Size returns the number of elements in the subtree.
-func (n *redBlackNode) Size() int {
+func (n *redBlackNode) Size(tree *RedBlackTree) int {
+	tree.mu.RLock()
+	defer tree.mu.RUnlock()
+
+	return n.size()
+}
+
+func (n *redBlackNode) size() int {
 	if n == nil {
 		return 0
 	}
 	size := 1
 	if n.left != nil {
-		size += n.left.Size()
+		size += n.left.size()
 	}
 	if n.right != nil {
-		size += n.right.Size()
+		size += n.right.size()
 	}
 	return size
 }
 
-// Keys returns all keys in-order
-func (t *RedBlackTree) Keys() []Key {
-	keys := make([]Key, t.size)
-	it := t.Iterator()
-	for i := 0; it.Next(); i++ {
-		keys[i] = it.Key()
-	}
-	return keys
-}
-
-// Left returns the minimal node or nil
-func (t *RedBlackTree) Left() *redBlackNode {
-	var parentNode *redBlackNode
-	for curNode := t.root; curNode != nil; curNode = curNode.left {
-		parentNode = curNode
-	}
-	return parentNode
-}
-
-// Right returns the max node or nil
-func (t *RedBlackTree) Right() *redBlackNode {
-	var parentNode *redBlackNode
-	for curNode := t.root; curNode != nil; curNode = curNode.right {
-		parentNode = curNode
-	}
-	return parentNode
-}
-
-// Floor Finds floor currentNode of the input key, return the floor currentNode or nil if no floor is found.
-func (t *RedBlackTree) Floor(key Key) (*redBlackNode, bool) {
-	var foundNode *redBlackNode
-	for curNode := t.root; curNode != nil; {
-		switch curNode.key.Compare(key) {
-		case KeyEqual:
-			return curNode, true
-		case KeyLessThan:
-			curNode = curNode.left
-		case KeyMoreThan:
-			foundNode = curNode
-			curNode = curNode.right
-		}
-	}
-	if foundNode != nil {
-		return foundNode, true
-	}
-	return nil, false
-}
-
-// Ceiling finds ceiling currentNode of the input key, return the ceiling currentNode or nil if no ceiling is found.
-func (t *RedBlackTree) Ceiling(key Key) (*redBlackNode, bool) {
-	var foundNode *redBlackNode
-	for curNode := t.root; curNode != nil; {
-		switch curNode.key.Compare(key) {
-		case KeyEqual:
-			return curNode, true
-		case KeyLessThan:
-			foundNode = curNode
-			curNode = curNode.left
-		case KeyMoreThan:
-			curNode = curNode.right
-		}
-	}
-	if foundNode != nil {
-		return foundNode, true
-	}
-	return nil, false
-}
-
 // Clear removes all nodes from the tree.
 func (t *RedBlackTree) Clear() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	t.root = nil
 	t.size = 0
 }
 
 // String implements Stringer interface
 func (t *RedBlackTree) String() string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 	str := "RedBlackTree\n"
-	if !t.IsEmpty() {
+	if t.size != 0 {
 		output(t.root, "", true, &str)
 	}
 	return str
 }
 
 func (n *redBlackNode) String() string {
-	return fmt.Sprintf("%v", n.key)
+	color := "B"
+	if nodeColor(n) == red {
+		color = "R"
+	}
+	return fmt.Sprintf("%s %v", color, n.key)
 }
 
 func output(node *redBlackNode, prefix string, isTail bool, str *string) {
@@ -258,7 +204,7 @@ func output(node *redBlackNode, prefix string, isTail bool, str *string) {
 func (t *RedBlackTree) lookup(key Key) *redBlackNode {
 	curNode := t.root
 	for curNode != nil {
-		switch curNode.key.Compare(key) {
+		switch key.Compare(curNode.key) {
 		case KeyEqual:
 			return curNode
 		case KeyLessThan:
@@ -385,10 +331,10 @@ func (n *redBlackNode) maximumNode() *redBlackNode {
 	if n == nil {
 		return nil
 	}
-	var curNode *redBlackNode
-	for curNode = n.right; curNode.right != nil; curNode = curNode.right {
+	for n.right != nil {
+		n = n.right
 	}
-	return curNode
+	return n
 }
 
 func (t *RedBlackTree) deleteCase1(node *redBlackNode) {

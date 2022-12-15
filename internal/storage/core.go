@@ -72,7 +72,7 @@ func (s *SyncMapStorage) getUnitId(unit Uniter) (UnitIdType, error) {
 			return true
 		}
 		if !reflect.ValueOf(v).CanConvert(nameType) {
-			err = fmt.Errorf("on call Range() wrong unit name value '%+v'", k)
+			log.Printf("on call Range() wrong unit name value '%+v'", k)
 			return false
 		}
 		if unitName == reflect.ValueOf(v).String() {
