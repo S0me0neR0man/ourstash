@@ -1,16 +1,85 @@
 package storage
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
+const (
+	loggerSyncInterval = time.Second
+)
+
+
+var (
+	instance *singletonLogger
+	once sync.Once
+)
+
+
+type singletonLogger struct {
+	logger *zap.Logger
+	cancel context.CancelFunc
+	mu sync.RWMutex
+}
+
+func (l *singletonLogger) sync() {
+	if err := l.logger.Sync(); err != nil {
+		l.logger.Fatal("sync error")
+	}
+}
+
+func (l *singletonLogger) StartSync() {
+	if l.cancel != nil {
+		l.StopSync()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	l.cancel = cancel
+
+	go func(ctx context.Context) {
+		ticker := time.NewTicker(loggerSyncInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				l.sync()
+			case <-ctx.Done():
+				return
+			}
+		}
+	}(ctx)
+}
+
+func (l *singletonLogger) StopSync() {
+	if l.cancel != nil {
+		l.cancel()
+		l.cancel = nil
+	}
+}
+
+func GetSingletonLogger() *singletonLogger {
+	once.Do(func() {
+		logger, err:= zap.NewDevelopment() // or NewProduction, or NewDevelopment
+		if err != nil {
+			log.Fatal(err)
+		}
+		instance = &singletonLogger{logger: logger}
+	})
+
+	return instance
+}
+
 func Test_redBlackTree_Put(t1 *testing.T) {
-	tree := NewRedBlackTree()
+	slogger := GetSingletonLogger()
+	defer slogger.StopSync()
+
+	tree := NewRedBlackTree(slogger.logger)
 	require.NotNil(t1, tree)
 	require.EqualValues(t1, tree.Size(), 0, "not empty")
 
@@ -39,7 +108,10 @@ func Test_redBlackTree_Put(t1 *testing.T) {
 }
 
 func TestRedBlackTree_Remove(t1 *testing.T) {
-	tree := NewRedBlackTree()
+	slogger := GetSingletonLogger()
+	defer slogger.StopSync()
+
+	tree := NewRedBlackTree(slogger.logger)
 	require.NotNil(t1, tree)
 	require.EqualValues(t1, tree.Size(), 0, "not empty")
 
@@ -97,13 +169,18 @@ func TestRedBlackTree_Remove(t1 *testing.T) {
 }
 
 func TestRedBlackTree_inGoroutines(t1 *testing.T) {
-	tree := NewRedBlackTree()
+	slogger := GetSingletonLogger()
+	defer slogger.StopSync()
+	sugar := slogger.logger.Sugar()
+
+	tree := NewRedBlackTree(slogger.logger)
+	tree.Debug = true
 	require.NotNil(t1, tree)
 	require.EqualValues(t1, tree.Size(), 0, "not empty")
 
 	goroutinesCount := 5
 	var wg sync.WaitGroup
-	wg.Add(goroutinesCount *2)
+	wg.Add(goroutinesCount *3)
 
 	func1 := func() {
 		tree.Put(NewKey(0, 10, 0, 0))
@@ -119,9 +196,8 @@ func TestRedBlackTree_inGoroutines(t1 *testing.T) {
 		tree.Put(NewKey(0, 5, 0, 0))
 		tree.Put(NewKey(0, 6, 0, 0))
 		wg.Done()
-		log.Println("func1 done")
 	}
-	log.Printf("-- %p\n", func1)
+	sugar.Infow("func1", "func1", fmt.Sprintf("%p", func1))
 
 	func2 := func() {
 		tree.Remove(NewKey(0, 10, 0, 0))
@@ -131,36 +207,36 @@ func TestRedBlackTree_inGoroutines(t1 *testing.T) {
 		tree.Remove(NewKey(0, 9, 0, 0))
 		tree.Remove(NewKey(0, 8, 0, 0))
 		wg.Done()
-		log.Println("func2 done")
 	}
-	log.Printf("-- %p\n", func2)
+	sugar.Infow("func2", "func2", fmt.Sprintf("%p", func2))
 
 	func3 := func() {
 		it := tree.Iterator()
-		log.Println("func3", it)
-		it.First()
-		//for res := it.First(); res; it.Next() {}
+		it.Begin()
+		flag := true
+		for flag {
+			flag = it.Next()
+		}
 		wg.Done()
-		log.Println("func3 done")
 	}
-	log.Printf("-- %p\n", func3)
+	sugar.Infow("func3", "func3", fmt.Sprintf("%p", func3))
 
 	func4 := func() {
 		it := tree.Iterator()
-		log.Println("func4", it)
-		for res := it.Last(); res; it.Prev() {}
+		it.End()
+		flag := true
+		for flag {
+			flag = it.Prev()
+		}
 		wg.Done()
-		log.Println("func4 done")
 	}
-	log.Printf("-- %p\n", func4)
+	sugar.Infow("func4", "func4", fmt.Sprintf("%p", func4))
 
-	log.Println("-- start")
-	// todo: deadlock bug
 	for i := 0; i < goroutinesCount; i++ {
 		go func1()
-		//go func2()
-		go func3()
-		//go func4()
+		go func2()
+		//go func3()
+		go func4()
 	}
 
 	wg.Wait()

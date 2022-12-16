@@ -3,6 +3,8 @@ package storage
 import (
 	"fmt"
 	"sync"
+
+	"go.uber.org/zap"
 )
 
 type color bool
@@ -16,6 +18,9 @@ type RedBlackTree struct {
 	mu   sync.RWMutex
 	root *redBlackNode
 	size int
+
+	sugar *zap.SugaredLogger
+	Debug bool
 }
 
 // redBlackNode is a tree element
@@ -27,14 +32,16 @@ type redBlackNode struct {
 	parent *redBlackNode
 }
 
-func NewRedBlackTree() *RedBlackTree {
-	return &RedBlackTree{}
+func NewRedBlackTree(logger *zap.Logger) *RedBlackTree {
+	return &RedBlackTree{sugar: logger.Sugar()}
 }
 
 // Put inserts key into the tree.
 func (t *RedBlackTree) Put(key Key) {
+	t.sugar.Infow("Put .", "t", fmt.Sprintf("%p", t), "key", key)
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.sugar.Infow("Put L", "t", fmt.Sprintf("%p", t), "key", key)
 
 	if t.root == nil {
 		t.root = &redBlackNode{key: key, color: black}
@@ -71,16 +78,20 @@ func (t *RedBlackTree) Put(key Key) {
 
 // GetNode searches the currentNode in the tree, nil not found
 func (t *RedBlackTree) GetNode(key Key) *redBlackNode {
+	t.sugar.Infow("GetNode .", "t", fmt.Sprintf("%p", t), "key", key)
 	t.mu.RLock()
 	defer t.mu.RUnlock()
+	t.sugar.Infow("GetNode L", "t", fmt.Sprintf("%p", t), "key", key)
 
 	return t.lookup(key)
 }
 
 // Remove the currentNode from the tree
 func (t *RedBlackTree) Remove(key Key) {
+	t.sugar.Infow("Remove .", "t", fmt.Sprintf("%p", t), "key", key)
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.sugar.Infow("Remove L", "t", fmt.Sprintf("%p", t), "key", key)
 
 	delNode := t.lookup(key)
 	if delNode == nil {
@@ -115,16 +126,20 @@ func (t *RedBlackTree) Remove(key Key) {
 
 // Size returns number of nodes
 func (t *RedBlackTree) Size() int {
+	t.sugar.Infow("Size .", "t", fmt.Sprintf("%p", t))
 	t.mu.RLock()
 	defer t.mu.RUnlock()
+	t.sugar.Infow("Size L", "t", fmt.Sprintf("%p", t))
 
 	return t.size
 }
 
 // Size returns the number of elements in the subtree.
 func (n *redBlackNode) Size(tree *RedBlackTree) int {
+	tree.sugar.Infow("node Size .", "n", fmt.Sprintf("%p", n))
 	tree.mu.RLock()
 	defer tree.mu.RUnlock()
+	tree.sugar.Infow("node Size L", "n", fmt.Sprintf("%p", n))
 
 	return n.size()
 }
@@ -145,8 +160,10 @@ func (n *redBlackNode) size() int {
 
 // Clear removes all nodes from the tree.
 func (t *RedBlackTree) Clear() {
+	t.sugar.Infow("Clear .", "t", fmt.Sprintf("%p", t))
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.sugar.Infow("Clear L", "t", fmt.Sprintf("%p", t))
 
 	t.root = nil
 	t.size = 0
@@ -154,8 +171,11 @@ func (t *RedBlackTree) Clear() {
 
 // String implements Stringer interface
 func (t *RedBlackTree) String() string {
+	t.sugar.Infow("String .", "t", fmt.Sprintf("%p", t))
 	t.mu.RLock()
 	defer t.mu.RUnlock()
+	t.sugar.Infow("String L", "t", fmt.Sprintf("%p", t))
+
 	str := "RedBlackTree\n"
 	if t.size != 0 {
 		output(t.root, "", true, &str)
