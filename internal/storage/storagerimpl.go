@@ -4,11 +4,11 @@ package storage
 
 type storagerImpl struct {
 	sectionId SectionIdType
-	recId RecordIdType
-	sm *SyncMapStorage
+	recId     RecordIdType
+	sm        *MyStorage
 }
 
-func newStoragerImpl(sId SectionIdType, rId RecordIdType, m *SyncMapStorage) *storagerImpl {
+func newStoragerImpl(sId SectionIdType, rId RecordIdType, m *MyStorage) *storagerImpl {
 	return &storagerImpl{sectionId: sId, recId: rId, sm: m}
 }
 

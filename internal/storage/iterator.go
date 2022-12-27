@@ -1,12 +1,10 @@
 package storage
 
-import "fmt"
-
-// Iterator holding the iterator's state
-type Iterator struct {
-	tree        *RedBlackTree
-	currentNode *redBlackNode
-	pos         position
+// iterator holding the iterators state
+type iterator struct {
+	tree *redBlackTree
+	node *redBlackNode
+	pos  position
 }
 
 type position byte
@@ -15,53 +13,55 @@ const (
 	begin, onmyway, end position = 0, 1, 2
 )
 
-// Iterator returns a iterator
-func (t *RedBlackTree) Iterator() Iterator {
-	t.sugar.Infow("Iterator .", "t", fmt.Sprintf("%p", t))
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	t.sugar.Infow("Iterator R", "t", fmt.Sprintf("%p", t))
-
-	return Iterator{tree: t, currentNode: nil, pos: begin}
+// iterator returns an iterator
+//
+// IMPORTANT: iterator does not provide thread safety
+func (t *redBlackTree) iterator() iterator {
+	return iterator{tree: t, node: nil, pos: begin}
 }
 
-// Next moves the iterator to the next element
-func (it *Iterator) Next() bool {
-	it.tree.sugar.Infow("Next .", "it", fmt.Sprintf("%p", it))
-	it.tree.mu.RLock()
-	defer it.tree.mu.RUnlock()
-	it.tree.sugar.Infow("Next R", "it", fmt.Sprintf("%p", it))
+// iteratorAt returns an iterator at node
+//
+// IMPORTANT: iterator does not provide thread safety
+func (t *redBlackTree) iteratorAt(node *redBlackNode) iterator {
+	if node == nil {
+		return iterator{tree: t, node: nil, pos: begin}
+	}
+	return iterator{tree: t, node: node, pos: onmyway}
+}
 
+// next moves the iterator to the next element
+func (it *iterator) next() bool {
 	if it.pos == end {
-		it.currentNode = nil
+		it.node = nil
 		return false
 	}
 
 	if it.pos == begin {
 		minNode := it.min()
 		if minNode == nil {
-			it.currentNode = nil
+			it.node = nil
 			it.pos = end
 			return false
 		}
-		it.currentNode = minNode
+		it.node = minNode
 		it.pos = onmyway
 		return true
 	}
 
-	if it.currentNode.right != nil {
-		it.currentNode = it.currentNode.right
-		for it.currentNode.left != nil {
-			it.currentNode = it.currentNode.left
+	if it.node.right != nil {
+		it.node = it.node.right
+		for it.node.left != nil {
+			it.node = it.node.left
 		}
 		it.pos = onmyway
 		return true
 	}
 
-	for it.currentNode.parent != nil {
-		node := it.currentNode
-		it.currentNode = it.currentNode.parent
-		if node == it.currentNode.left {
+	for it.node.parent != nil {
+		node := it.node
+		it.node = it.node.parent
+		if node == it.node.left {
 			break
 		}
 	}
@@ -70,43 +70,38 @@ func (it *Iterator) Next() bool {
 	return true
 }
 
-// Prev moves the iterator to the previous element
-func (it *Iterator) Prev() bool {
-	it.tree.sugar.Infow("Prev .", "it", fmt.Sprintf("%p", it))
-	it.tree.mu.RLock()
-	defer it.tree.mu.RUnlock()
-	it.tree.sugar.Infow("Prev R", "it", fmt.Sprintf("%p", it))
-
+// prev moves the iterator to the previous element
+func (it *iterator) prev() bool {
 	if it.pos == begin {
-		it.currentNode = nil
+		it.node = nil
 		return false
 	}
 
 	if it.pos == end {
 		maxNode := it.max()
 		if maxNode == nil {
-			it.currentNode = nil
+			it.node = nil
 			it.pos = begin
 			return false
 		}
-		it.currentNode = maxNode
+		it.node = maxNode
 		it.pos = onmyway
 		return true
 	}
 
-	if it.currentNode.left != nil {
-		it.currentNode = it.currentNode.left
-		for it.currentNode.right != nil {
-			it.currentNode = it.currentNode.right
+	if it.node.left != nil {
+		it.node = it.node.left
+		for it.node.right != nil {
+			it.node = it.node.right
 		}
 		it.pos = onmyway
 		return true
 	}
 
-	for it.currentNode.parent != nil {
-		curNode := it.currentNode
-		it.currentNode = it.currentNode.parent
-		if curNode == it.currentNode.right {
+	for it.node.parent != nil {
+		curNode := it.node
+		it.node = it.node.parent
+		if curNode == it.node.right {
 			break
 		}
 	}
@@ -114,62 +109,37 @@ func (it *Iterator) Prev() bool {
 	return true
 }
 
-// Key returns the current element's key.
-func (it *Iterator) Key() Key {
-	it.tree.sugar.Infow("Key .", "it", fmt.Sprintf("%p", it))
-	it.tree.mu.RLock()
-	defer it.tree.mu.RUnlock()
-	it.tree.sugar.Infow("Key R", "it", fmt.Sprintf("%p", it))
-
-	return it.currentNode.key
+// current returns the current element's node.
+func (it *iterator) current() *redBlackNode {
+	return it.node
 }
 
-// Node returns the current element's currentNode.
-func (it *Iterator) Node() *redBlackNode {
-	it.tree.sugar.Infow("Node .", "it", fmt.Sprintf("%p", it))
-	it.tree.mu.RLock()
-	defer it.tree.mu.RUnlock()
-	it.tree.sugar.Infow("Node R", "it", fmt.Sprintf("%p", it))
-
-	return it.currentNode
-}
-
-// Begin resets the iterator to one-before-first
-func (it *Iterator) Begin() {
-	it.tree.sugar.Infow("Begin .", "it", fmt.Sprintf("%p", it))
-	it.tree.mu.RLock()
-	defer it.tree.mu.RUnlock()
-	it.tree.sugar.Infow("Begin R", "it", fmt.Sprintf("%p", it))
-
-	it.currentNode = nil
+// begin resets the iterator to one-before-first
+func (it *iterator) begin() {
+	it.node = nil
 	it.pos = begin
 }
 
-// End moves the iterator to one-past-the-end
-func (it *Iterator) End() {
-	it.tree.sugar.Infow("End .", "it", fmt.Sprintf("%p", it))
-	it.tree.mu.RLock()
-	defer it.tree.mu.RUnlock()
-	it.tree.sugar.Infow("End R", "it", fmt.Sprintf("%p", it))
-
-	it.currentNode = nil
+// end moves the iterator to one-past-the-end
+func (it *iterator) end() {
+	it.node = nil
 	it.pos = end
 }
 
-// min returns the minimal node or nil
-func (it *Iterator) min() *redBlackNode {
-	var parentNode *redBlackNode
+// min returns the minimal current or nil
+func (it *iterator) min() *redBlackNode {
+	var minNode *redBlackNode
 	for curNode := it.tree.root; curNode != nil; curNode = curNode.left {
-		parentNode = curNode
+		minNode = curNode
 	}
-	return parentNode
+	return minNode
 }
 
-// max returns the max node or nil
-func (it *Iterator) max() *redBlackNode {
-	var parentNode *redBlackNode
+// max returns the max current or nil
+func (it *iterator) max() *redBlackNode {
+	var maxNode *redBlackNode
 	for curNode := it.tree.root; curNode != nil; curNode = curNode.right {
-		parentNode = curNode
+		maxNode = curNode
 	}
-	return parentNode
+	return maxNode
 }

@@ -3,8 +3,6 @@ package storage
 import (
 	"fmt"
 	"sync"
-
-	"go.uber.org/zap"
 )
 
 type color bool
@@ -13,14 +11,11 @@ const (
 	black, red color = true, false
 )
 
-// RedBlackTree main index
-type RedBlackTree struct {
+// redBlackTree main index
+type redBlackTree struct {
 	mu   sync.RWMutex
 	root *redBlackNode
 	size int
-
-	sugar *zap.SugaredLogger
-	Debug bool
 }
 
 // redBlackNode is a tree element
@@ -32,16 +27,16 @@ type redBlackNode struct {
 	parent *redBlackNode
 }
 
-func NewRedBlackTree(logger *zap.Logger) *RedBlackTree {
-	return &RedBlackTree{sugar: logger.Sugar()}
+func newRedBlackTree() *redBlackTree {
+	return &redBlackTree{}
 }
 
-// Put inserts key into the tree.
-func (t *RedBlackTree) Put(key Key) {
-	t.sugar.Infow("Put .", "t", fmt.Sprintf("%p", t), "key", key)
+// put inserts key into the tree.
+//
+// thread safe
+func (t *redBlackTree) put(key Key) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.sugar.Infow("Put L", "t", fmt.Sprintf("%p", t), "key", key)
 
 	if t.root == nil {
 		t.root = &redBlackNode{key: key, color: black}
@@ -76,22 +71,22 @@ func (t *RedBlackTree) Put(key Key) {
 	}
 }
 
-// GetNode searches the currentNode in the tree, nil not found
-func (t *RedBlackTree) GetNode(key Key) *redBlackNode {
-	t.sugar.Infow("GetNode .", "t", fmt.Sprintf("%p", t), "key", key)
+// get searches the node in the tree, nil not found
+//
+// thread safe
+func (t *redBlackTree) get(key Key) *redBlackNode {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	t.sugar.Infow("GetNode L", "t", fmt.Sprintf("%p", t), "key", key)
 
 	return t.lookup(key)
 }
 
-// Remove the currentNode from the tree
-func (t *RedBlackTree) Remove(key Key) {
-	t.sugar.Infow("Remove .", "t", fmt.Sprintf("%p", t), "key", key)
+// remove the node from the tree
+//
+// thread safe
+func (t *redBlackTree) remove(key Key) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.sugar.Infow("Remove L", "t", fmt.Sprintf("%p", t), "key", key)
 
 	delNode := t.lookup(key)
 	if delNode == nil {
@@ -124,26 +119,21 @@ func (t *RedBlackTree) Remove(key Key) {
 	t.size--
 }
 
-// Size returns number of nodes
-func (t *RedBlackTree) Size() int {
-	t.sugar.Infow("Size .", "t", fmt.Sprintf("%p", t))
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	t.sugar.Infow("Size L", "t", fmt.Sprintf("%p", t))
-
+// sizeof returns number of nodes
+//
+// IMPORTANT: does not provide thread safety
+func (t *redBlackTree) sizeof() int {
 	return t.size
 }
 
-// Size returns the number of elements in the subtree.
-func (n *redBlackNode) Size(tree *RedBlackTree) int {
-	tree.sugar.Infow("node Size .", "n", fmt.Sprintf("%p", n))
-	tree.mu.RLock()
-	defer tree.mu.RUnlock()
-	tree.sugar.Infow("node Size L", "n", fmt.Sprintf("%p", n))
-
+// sizeof returns the number of elements in the subtree.
+//
+// IMPORTANT: does not provide thread safety
+func (n *redBlackNode) sizeof(tree *redBlackTree) int {
 	return n.size()
 }
 
+// size calc current size
 func (n *redBlackNode) size() int {
 	if n == nil {
 		return 0
@@ -158,31 +148,20 @@ func (n *redBlackNode) size() int {
 	return size
 }
 
-// Clear removes all nodes from the tree.
-func (t *RedBlackTree) Clear() {
-	t.sugar.Infow("Clear .", "t", fmt.Sprintf("%p", t))
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.sugar.Infow("Clear L", "t", fmt.Sprintf("%p", t))
-
-	t.root = nil
-	t.size = 0
-}
-
 // String implements Stringer interface
-func (t *RedBlackTree) String() string {
-	t.sugar.Infow("String .", "t", fmt.Sprintf("%p", t))
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	t.sugar.Infow("String L", "t", fmt.Sprintf("%p", t))
-
-	str := "RedBlackTree\n"
+//
+// IMPORTANT: does not provide thread safety
+func (t *redBlackTree) String() string {
+	str := "redBlackTree\n"
 	if t.size != 0 {
 		output(t.root, "", true, &str)
 	}
 	return str
 }
 
+// String implements Stringer interface
+//
+// IMPORTANT: does not provide thread safety
 func (n *redBlackNode) String() string {
 	color := "B"
 	if nodeColor(n) == red {
@@ -191,10 +170,10 @@ func (n *redBlackNode) String() string {
 	return fmt.Sprintf("%s %v", color, n.key)
 }
 
-func output(node *redBlackNode, prefix string, isTail bool, str *string) {
+func output(node *redBlackNode, prefix string, tail bool, str *string) {
 	if node.right != nil {
 		newPrefix := prefix
-		if isTail {
+		if tail {
 			newPrefix += "│   "
 		} else {
 			newPrefix += "    "
@@ -203,7 +182,7 @@ func output(node *redBlackNode, prefix string, isTail bool, str *string) {
 	}
 
 	*str += prefix
-	if isTail {
+	if tail {
 		*str += "└── "
 	} else {
 		*str += "┌── "
@@ -212,7 +191,7 @@ func output(node *redBlackNode, prefix string, isTail bool, str *string) {
 	*str += node.String() + "\n"
 	if node.left != nil {
 		newPrefix := prefix
-		if isTail {
+		if tail {
 			newPrefix += "    "
 		} else {
 			newPrefix += "│   "
@@ -221,7 +200,7 @@ func output(node *redBlackNode, prefix string, isTail bool, str *string) {
 	}
 }
 
-func (t *RedBlackTree) lookup(key Key) *redBlackNode {
+func (t *redBlackTree) lookup(key Key) *redBlackNode {
 	curNode := t.root
 	for curNode != nil {
 		switch key.Compare(curNode.key) {
@@ -260,7 +239,7 @@ func (n *redBlackNode) sibling() *redBlackNode {
 	return n.parent.left
 }
 
-func (t *RedBlackTree) rotateLeft(node *redBlackNode) {
+func (t *redBlackTree) rotateLeft(node *redBlackNode) {
 	right := node.right
 	t.replaceNode(node, right)
 	node.right = right.left
@@ -271,7 +250,7 @@ func (t *RedBlackTree) rotateLeft(node *redBlackNode) {
 	node.parent = right
 }
 
-func (t *RedBlackTree) rotateRight(node *redBlackNode) {
+func (t *redBlackTree) rotateRight(node *redBlackNode) {
 	left := node.left
 	t.replaceNode(node, left)
 	node.left = left.right
@@ -282,7 +261,7 @@ func (t *RedBlackTree) rotateRight(node *redBlackNode) {
 	node.parent = left
 }
 
-func (t *RedBlackTree) replaceNode(old *redBlackNode, new *redBlackNode) {
+func (t *redBlackTree) replaceNode(old *redBlackNode, new *redBlackNode) {
 	if old.parent == nil {
 		t.root = new
 	} else {
@@ -297,7 +276,7 @@ func (t *RedBlackTree) replaceNode(old *redBlackNode, new *redBlackNode) {
 	}
 }
 
-func (t *RedBlackTree) insertCase1(node *redBlackNode) {
+func (t *redBlackTree) insertCase1(node *redBlackNode) {
 	if node.parent == nil {
 		node.color = black
 	} else {
@@ -305,14 +284,14 @@ func (t *RedBlackTree) insertCase1(node *redBlackNode) {
 	}
 }
 
-func (t *RedBlackTree) insertCase2(node *redBlackNode) {
+func (t *redBlackTree) insertCase2(node *redBlackNode) {
 	if nodeColor(node.parent) == black {
 		return
 	}
 	t.insertCase3(node)
 }
 
-func (t *RedBlackTree) insertCase3(node *redBlackNode) {
+func (t *redBlackTree) insertCase3(node *redBlackNode) {
 	uncleNode := node.uncle()
 	if nodeColor(uncleNode) == red {
 		node.parent.color = black
@@ -324,7 +303,7 @@ func (t *RedBlackTree) insertCase3(node *redBlackNode) {
 	}
 }
 
-func (t *RedBlackTree) insertCase4(node *redBlackNode) {
+func (t *redBlackTree) insertCase4(node *redBlackNode) {
 	grandparentNode := node.grandparent()
 	if node == node.parent.right && node.parent == grandparentNode.left {
 		t.rotateLeft(node.parent)
@@ -336,7 +315,7 @@ func (t *RedBlackTree) insertCase4(node *redBlackNode) {
 	t.insertCase5(node)
 }
 
-func (t *RedBlackTree) insertCase5(node *redBlackNode) {
+func (t *redBlackTree) insertCase5(node *redBlackNode) {
 	node.parent.color = black
 	grandparentNode := node.grandparent()
 	grandparentNode.color = red
@@ -357,14 +336,14 @@ func (n *redBlackNode) maximumNode() *redBlackNode {
 	return n
 }
 
-func (t *RedBlackTree) deleteCase1(node *redBlackNode) {
+func (t *redBlackTree) deleteCase1(node *redBlackNode) {
 	if node.parent == nil {
 		return
 	}
 	t.deleteCase2(node)
 }
 
-func (t *RedBlackTree) deleteCase2(node *redBlackNode) {
+func (t *redBlackTree) deleteCase2(node *redBlackNode) {
 	siblingNode := node.sibling()
 	if nodeColor(siblingNode) == red {
 		node.parent.color = red
@@ -378,7 +357,7 @@ func (t *RedBlackTree) deleteCase2(node *redBlackNode) {
 	t.deleteCase3(node)
 }
 
-func (t *RedBlackTree) deleteCase3(node *redBlackNode) {
+func (t *redBlackTree) deleteCase3(node *redBlackNode) {
 	siblingNode := node.sibling()
 	if nodeColor(node.parent) == black &&
 		nodeColor(siblingNode) == black &&
@@ -391,7 +370,7 @@ func (t *RedBlackTree) deleteCase3(node *redBlackNode) {
 	}
 }
 
-func (t *RedBlackTree) deleteCase4(node *redBlackNode) {
+func (t *redBlackTree) deleteCase4(node *redBlackNode) {
 	siblingNode := node.sibling()
 	if nodeColor(node.parent) == red &&
 		nodeColor(siblingNode) == black &&
@@ -404,7 +383,7 @@ func (t *RedBlackTree) deleteCase4(node *redBlackNode) {
 	}
 }
 
-func (t *RedBlackTree) deleteCase5(node *redBlackNode) {
+func (t *redBlackTree) deleteCase5(node *redBlackNode) {
 	siblingNode := node.sibling()
 	if node == node.parent.left &&
 		nodeColor(siblingNode) == black &&
@@ -424,7 +403,7 @@ func (t *RedBlackTree) deleteCase5(node *redBlackNode) {
 	t.deleteCase6(node)
 }
 
-func (t *RedBlackTree) deleteCase6(node *redBlackNode) {
+func (t *redBlackTree) deleteCase6(node *redBlackNode) {
 	siblingNode := node.sibling()
 	siblingNode.color = nodeColor(node.parent)
 	node.parent.color = black
