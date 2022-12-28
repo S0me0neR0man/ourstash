@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -48,14 +49,16 @@ func newRecordHeader() recordHeader {
 // Most important part - synthetic key (see Key type)
 type stash struct {
 	redBlackTree
-	m     sync.Map
-	sugar *zap.SugaredLogger
+	m  sync.Map
+	mu sync.RWMutex
 
 	fields   map[SectionIdType]map[string]FieldIdType
 	sfFields singleflight.Group
 
 	records   map[SectionIdType]map[string]Key
 	sfRecords singleflight.Group
+
+	sugar *zap.SugaredLogger
 }
 
 func newStash(logger *zap.Logger) *stash {
@@ -69,12 +72,13 @@ func newStash(logger *zap.Logger) *stash {
 
 func (s *stash) newId(section SectionIdType) RecordIdType {
 	key := NewKey(section, counterRecordId, counterFieldId)
-	aid, loaded := s.m.LoadOrStore(key, RecordIdType(1))
-	id := aid.(RecordIdType)
+	var firstId uint64 = 1
+	aid, loaded := s.m.LoadOrStore(key, &firstId)
 	if !loaded {
-		s.put(key)
+		s.put(key) // todo: move to init section
+		return RecordIdType(firstId)
 	}
-	return RecordIdType(id)
+	return RecordIdType(atomic.AddUint64(aid.(*uint64), 1))
 }
 
 // findRecord find first node in record
@@ -130,9 +134,6 @@ func (s *stash) getRecordHeader(key Key) (recordHeader, error) {
 	return header, nil
 }
 
-// fieldIdSingleFlight returns field id, register if new field passed
-//
-// thread safe
 func (s *stash) fieldIdSingleFlight(section SectionIdType, fieldName string) FieldIdType {
 	key := string(section)
 	res, _, _ := s.sfFields.Do(key,
@@ -155,9 +156,6 @@ func (s *stash) fieldIdSingleFlight(section SectionIdType, fieldName string) Fie
 	return res.(FieldIdType)
 }
 
-// fieldsInSection returns all fieldsInSection in section, all errors are ignored
-//
-// IMPORTANT: does not provide thread safety
 func (s *stash) fieldsInSection(section SectionIdType) map[string]FieldIdType {
 	res := make(map[string]FieldIdType)
 
@@ -181,9 +179,6 @@ func (s *stash) fieldsInSection(section SectionIdType) map[string]FieldIdType {
 	return res
 }
 
-// fieldNameSingleFlight returns field name
-//
-// thread safe
 func (s *stash) fieldNameSingleFlight(section SectionIdType, fieldId FieldIdType) (string, error) {
 	key := string(section)
 	res, err, _ := s.sfFields.Do(key,
@@ -206,30 +201,7 @@ func (s *stash) fieldNameSingleFlight(section SectionIdType, fieldId FieldIdType
 	return res.(string), nil
 }
 
-// Insert data
-func (s *stash) Insert(section SectionIdType, data map[string]any) string {
-	rec := s.newId(section)
-
-	key := NewKey(section, rec, headerFieldId)
-	header := newRecordHeader()
-	s.m.Store(key, header)
-	s.recordSingleFlight(section, header.guid, key)
-	s.put(key)
-
-	for name, value := range data {
-		fid := s.fieldIdSingleFlight(section, name)
-		key := NewKey(section, rec, fid)
-		s.m.Store(key, value)
-		s.put(key)
-	}
-
-	return header.guid
-}
-
-// recordIdSingleFlight returns record id
-//
-// thread safe
-func (s *stash) recordIdSingleFlight(section SectionIdType, guid string) (Key, error) {
+func (s *stash) recordKeySingleFlight(section SectionIdType, guid string) (Key, error) {
 	key := string(section)
 	res, err, _ := s.sfRecords.Do(key,
 		func() (interface{}, error) {
@@ -250,10 +222,7 @@ func (s *stash) recordIdSingleFlight(section SectionIdType, guid string) (Key, e
 	return res.(Key), nil
 }
 
-// recordSingleFlight add record in s.records
-//
-// thread safe
-func (s *stash) recordSingleFlight(section SectionIdType, recGuid string, recKey Key) {
+func (s *stash) recordAddSingleFlight(section SectionIdType, recGuid string, recKey Key) {
 	key := string(section)
 	_, _, _ = s.sfRecords.Do(key,
 		func() (interface{}, error) {
@@ -266,9 +235,28 @@ func (s *stash) recordSingleFlight(section SectionIdType, recGuid string, recKey
 		})
 }
 
-// recordsInSection returns all records in section, all errors are ignored
-//
-// IMPORTANT: does not provide thread safety
+func (s *stash) recordRemoveSingleFlight(section SectionIdType, guid string) (Key, error) {
+	key := string(section)
+	res, err, _ := s.sfRecords.Do(key,
+		func() (interface{}, error) {
+			if s.records[section] == nil {
+				// todo: move init and change single flight key
+				s.records[section] = s.recordsInSection(section)
+			}
+			recKey, ok := s.records[section][guid]
+			if !ok {
+				return recKey, ErrRecordNotFound
+			}
+			delete(s.records[section], guid)
+			return recKey, nil
+		})
+
+	if err != nil {
+		return res.(Key), err
+	}
+	return res.(Key), nil
+}
+
 func (s *stash) recordsInSection(section SectionIdType) map[string]Key {
 	res := make(map[string]Key)
 
@@ -304,25 +292,51 @@ func (s *stash) recordsInSection(section SectionIdType) map[string]Key {
 	return res
 }
 
+// Insert data
+func (s *stash) Insert(section SectionIdType, data map[string]any) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	recId := s.newId(section)
+	key := NewKey(section, recId, headerFieldId)
+	header := newRecordHeader()
+	s.m.Store(key, header)
+	s.recordAddSingleFlight(section, header.guid, key)
+	s.put(key)
+	s.sugar.Debugw("insert header", "guid", header.guid, "key", key)
+
+	for name, value := range data {
+		fid := s.fieldIdSingleFlight(section, name)
+		key := NewKey(section, recId, fid)
+		s.m.Store(key, value)
+		s.put(key)
+		s.sugar.Debugw("insert field", "name", name, "key", key)
+	}
+
+	return header.guid
+}
+
 // Get record data
 func (s *stash) Get(section SectionIdType, guid string) (map[string]any, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	key, err := s.recordIdSingleFlight(section, guid)
+	key, err := s.recordKeySingleFlight(section, guid)
 	if err != nil {
 		return nil, err
 	}
+	s.sugar.Debugw("get", "guid", guid, "key", key)
+
 	node := s.get(key)
 	if node == nil {
 		return nil, ErrRecordNotFound
 	}
-	record := node.key.Record()
+	recId := node.key.Record()
 
 	res := make(map[string]any)
 	it := s.iteratorAt(node)
 	for it.pos == onmyway {
-		if it.node.key.Section() != section || it.node.key.Record() != record {
+		if it.node.key.Section() != section || it.node.key.Record() != recId {
 			break
 		}
 		if it.node.key.Field() == headerFieldId {
@@ -331,10 +345,12 @@ func (s *stash) Get(section SectionIdType, guid string) (map[string]any, error) 
 		}
 		name, err := s.fieldNameSingleFlight(section, it.node.key.Field())
 		if err != nil {
+			s.sugar.Debugw("fieldNameSingleFlight", "err", err)
 			return nil, err
 		}
 		value, ok := s.m.Load(it.node.key)
 		if !ok {
+			s.sugar.Debugw("s.m.Load", "err", "!ok")
 			return nil, errors.New("get: impossible, value stolen")
 		}
 		res[name] = value
@@ -345,14 +361,23 @@ func (s *stash) Get(section SectionIdType, guid string) (map[string]any, error) 
 	return res, nil
 }
 
-func (s *stash) Remove(section SectionIdType, record RecordIdType) error {
-	//s.mu.Lock()
-	//defer s.mu.Unlock()
-	//
-	//node, found := s.findRecord(section, record)
-	//if !found {
-	//	return ErrRecordNotFound
-	//}
-	//
-	return ErrNotImplemented
+func (s *stash) Remove(section SectionIdType, guid string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	key, err := s.recordRemoveSingleFlight(section, guid)
+	if err != nil {
+		return err
+	}
+	s.sugar.Debugw("remove", "guid", guid, "key", key)
+
+	var header recordHeader
+	header, err = s.getRecordHeader(key)
+	if err != nil {
+		return err
+	}
+	header.deleted = true
+	s.m.Store(key, header)
+
+	return nil
 }

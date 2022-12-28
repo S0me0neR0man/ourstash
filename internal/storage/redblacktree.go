@@ -2,7 +2,6 @@ package storage
 
 import (
 	"fmt"
-	"sync"
 )
 
 type color bool
@@ -13,7 +12,6 @@ const (
 
 // redBlackTree main index
 type redBlackTree struct {
-	mu   sync.RWMutex
 	root *redBlackNode
 	size int
 }
@@ -34,9 +32,6 @@ func newRedBlackTree() *redBlackTree {
 // put inserts key into the tree.
 // thread safe
 func (t *redBlackTree) put(key Key) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
 	if t.root == nil {
 		t.root = &redBlackNode{key: key, color: black}
 		t.size++
@@ -74,9 +69,6 @@ func (t *redBlackTree) put(key Key) {
 //
 // thread safe
 func (t *redBlackTree) get(key Key) *redBlackNode {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
 	return t.lookup(key)
 }
 
@@ -84,9 +76,6 @@ func (t *redBlackTree) get(key Key) *redBlackNode {
 //
 // thread safe
 func (t *redBlackTree) remove(key Key) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
 	delNode := t.lookup(key)
 	if delNode == nil {
 		return
@@ -118,21 +107,14 @@ func (t *redBlackTree) remove(key Key) {
 	t.size--
 }
 
-// sizeof returns number of nodes
-//
-// IMPORTANT: does not provide thread safety
 func (t *redBlackTree) sizeof() int {
 	return t.size
 }
 
-// sizeof returns the number of elements in the subtree.
-//
-// IMPORTANT: does not provide thread safety
 func (n *redBlackNode) sizeof(tree *redBlackTree) int {
 	return n.size()
 }
 
-// size calc current size
 func (n *redBlackNode) size() int {
 	if n == nil {
 		return 0
@@ -147,9 +129,6 @@ func (n *redBlackNode) size() int {
 	return size
 }
 
-// String implements Stringer interface
-//
-// IMPORTANT: does not provide thread safety
 func (t *redBlackTree) String() string {
 	str := "redBlackTree\n"
 	if t.size != 0 {
@@ -158,9 +137,6 @@ func (t *redBlackTree) String() string {
 	return str
 }
 
-// String implements Stringer interface
-//
-// IMPORTANT: does not provide thread safety
 func (n *redBlackNode) String() string {
 	color := "B"
 	if nodeColor(n) == red {
