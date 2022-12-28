@@ -11,7 +11,7 @@ func Test_stash_fields(t *testing.T) {
 	s := newStash(getTestLogger())
 	require.NotNil(t, s)
 
-	f := s.fields(1)
+	f := s.fieldsInSection(1)
 	require.NotNil(t, f)
 
 	to := map[string]any{
@@ -23,9 +23,8 @@ func Test_stash_fields(t *testing.T) {
 	rec := s.Insert(1, to)
 
 	log.Println(s)
-	fields := s.fields(1)
+	fields := s.fieldsInSection(1)
 	log.Println(fields)
-	require.Less(t, RecordIdType(0), rec)
 
 	from, err := s.Get(1, rec)
 	require.NoError(t, err)

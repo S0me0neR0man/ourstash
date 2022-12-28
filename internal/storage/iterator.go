@@ -62,12 +62,14 @@ func (it *iterator) next() bool {
 		node := it.node
 		it.node = it.node.parent
 		if node == it.node.left {
-			break
+			it.pos = onmyway
+			return true
 		}
 	}
 
-	it.pos = onmyway
-	return true
+	it.pos = end
+	it.node = nil
+	return false
 }
 
 // prev moves the iterator to the previous element
@@ -102,11 +104,14 @@ func (it *iterator) prev() bool {
 		curNode := it.node
 		it.node = it.node.parent
 		if curNode == it.node.right {
-			break
+			it.pos = onmyway
+			return true
 		}
 	}
-	it.pos = onmyway
-	return true
+
+	it.node = nil
+	it.pos = begin
+	return false
 }
 
 // current returns the current element's node.

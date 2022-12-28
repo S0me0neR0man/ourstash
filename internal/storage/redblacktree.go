@@ -32,7 +32,6 @@ func newRedBlackTree() *redBlackTree {
 }
 
 // put inserts key into the tree.
-//
 // thread safe
 func (t *redBlackTree) put(key Key) {
 	t.mu.Lock()
