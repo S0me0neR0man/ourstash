@@ -8,12 +8,15 @@ import (
 )
 
 const (
-	keyLength = 32
+	keyLength = 16
+
+	KeyLessThan int = -1
+	KeyEqual    int = 0
+	KeyMoreThan int = 1
 )
 
 type SectionIdType byte
 type RecordIdType uint64
-type UnitIdType uint16
 type FieldIdType uint16
 
 // Key the synthetic unique key. All digit stored in BigEndian notation.
@@ -22,20 +25,17 @@ type FieldIdType uint16
 //
 // [1:9] the record id uint64
 //
-// [9:11] the unit id uint16
+// [09:11] the field id uint16
 //
-// [11:13] the field id uint16
-//
-// [13:32] reserved
+// [11:16] reserved
 type Key [keyLength]byte
 
 // NewKey make new block key
-func NewKey(sec SectionIdType, rec RecordIdType, unit UnitIdType, field FieldIdType) Key {
+func NewKey(sec SectionIdType, rec RecordIdType, field FieldIdType) Key {
 	var k [keyLength]byte
 	k[0] = byte(sec)
 	binary.BigEndian.PutUint64(k[1:9], uint64(rec))
-	binary.BigEndian.PutUint16(k[9:11], uint16(unit))
-	binary.BigEndian.PutUint16(k[11:13], uint16(field))
+	binary.BigEndian.PutUint16(k[9:11], uint16(field))
 	return k
 }
 
@@ -49,11 +49,10 @@ func NewKeyFromBytes(b []byte) (Key, error) {
 
 // String is Stringer implementation
 func (k Key) String() string {
-	return fmt.Sprintf("%s %s %s %s",
+	return fmt.Sprintf("%s %s %s",
 		hex.EncodeToString(k[0:1]),
 		hex.EncodeToString(k[1:9]),
 		hex.EncodeToString(k[9:11]),
-		hex.EncodeToString(k[11:13]),
 	)
 }
 
@@ -62,14 +61,31 @@ func (k Key) Section() SectionIdType {
 }
 
 func (k Key) Record() RecordIdType {
-	return RecordIdType(binary.BigEndian.Uint16(k[1:9]))
-}
-
-func (k Key) Unit() UnitIdType {
-	return UnitIdType(binary.BigEndian.Uint64(k[9:11]))
+	return RecordIdType(binary.BigEndian.Uint64(k[1:9]))
 }
 
 func (k Key) Field() FieldIdType {
-	return FieldIdType(binary.BigEndian.Uint64(k[11:13]))
+	return FieldIdType(binary.BigEndian.Uint16(k[9:11]))
 }
 
+func (k Key) Compare(other Key) int {
+	if k.Section() < other.Section() {
+		return KeyLessThan
+	}
+	if k.Section() > other.Section() {
+		return KeyMoreThan
+	}
+	if k.Record() < other.Record() {
+		return KeyLessThan
+	}
+	if k.Record() > other.Record() {
+		return KeyMoreThan
+	}
+	if k.Field() < other.Field() {
+		return KeyLessThan
+	}
+	if k.Field() > other.Field() {
+		return KeyMoreThan
+	}
+	return KeyEqual
+}

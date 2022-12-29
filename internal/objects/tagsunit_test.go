@@ -24,6 +24,4 @@ func TestNewTagsUnit(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, chainTo)
 	chainTo.Attach(tags.PutMiddleware)
-	err = store.New(chainTo)
-	require.NoError(t, err)
 }

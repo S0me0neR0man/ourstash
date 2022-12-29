@@ -21,7 +21,7 @@ func (s *SysUnit) String() string {
 }
 
 func (s *SysUnit) Name() string {
-	return sysUnitName
+	return ""
 }
 
 func (s *SysUnit) PutMiddleware(next PutHandler) PutHandler {
