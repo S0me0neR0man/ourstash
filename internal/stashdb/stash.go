@@ -18,10 +18,10 @@ type OperationType string
 type GUIDType string
 
 const (
-	metadataSection  SectionIdType = 0
-	metadataRecordId RecordIdType  = 0
-	counterFieldId   FieldIdType   = 0
-	headerFieldId    FieldIdType   = 0
+	//	metadataSection  SectionIdType = 0
+	metadataRecordId RecordIdType = 0
+	counterFieldId   FieldIdType  = 0
+	headerFieldId    FieldIdType  = 0
 
 	InsertOperation OperationType = "insert"
 	UpdateOperation OperationType = "update"
