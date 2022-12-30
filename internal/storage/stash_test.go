@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"strconv"
 	"sync"
 	"testing"
@@ -122,3 +123,44 @@ func Test_stash_inGoroutines(t *testing.T) {
 
 	wg.Wait()
 }
+
+func Test_stash_Find(t *testing.T) {
+	s := newStash(getTestLogger())
+	require.NotNil(t, s)
+
+	to := []map[string]any{
+		{
+			"tag":     "#tag1",
+			"text":    "sample text",
+			"int_val": 1,
+		},
+		{
+			"tag":     "#tag1",
+			"text":    "sample text",
+			"int_val": 20,
+		},
+		{
+			"tag":     "#tag1",
+			"text":    "sample text",
+			"int_val": 3,
+		},
+	}
+
+	for _, m := range to {
+		recGuid := s.Insert(1, m)
+		require.EqualValues(t, true, recGuid != "")
+	}
+
+	ctx := context.Background()
+	records, err := s.Find(ctx, 1, func(m *map[string]any) bool {
+		val, ok := (*m)["int_val"]
+		if ok && val.(int) < 10 {
+			return true
+		}
+		return false
+	})
+
+	require.NoError(t, err)
+	require.EqualValues(t, 2, len(records))
+}
+

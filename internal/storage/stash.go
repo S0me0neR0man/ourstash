@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strconv"
@@ -17,10 +18,10 @@ type OperationType string
 type GUIDType string
 
 const (
-	metadataSection SectionIdType = 0
-	metadaRecordId  RecordIdType  = 0
-	counterFieldId  FieldIdType   = 0
-	headerFieldId   FieldIdType   = 0
+	metadataSection  SectionIdType = 0
+	metadataRecordId RecordIdType  = 0
+	counterFieldId   FieldIdType   = 0
+	headerFieldId    FieldIdType   = 0
 
 	InsertOperation OperationType = "insert"
 	UpdateOperation OperationType = "update"
@@ -48,6 +49,12 @@ func newRecordHeader(op OperationType) recordHeader {
 		deleted:   false,
 		operation: op,
 	}
+}
+
+type Record struct {
+	guid GUIDType
+	key  Key
+	data map[string]any
 }
 
 // stash the in-memory NoSQL key-value tread safe storage.
@@ -78,7 +85,7 @@ func newStash(logger *zap.Logger) *stash {
 }
 
 func (s *stash) newId(section SectionIdType) RecordIdType {
-	key := NewKey(section, metadaRecordId, counterFieldId)
+	key := NewKey(section, metadataRecordId, counterFieldId)
 	var firstId uint64 = 1
 	aid, loaded := s.m.LoadOrStore(key, &firstId)
 	if !loaded {
@@ -150,7 +157,7 @@ func (s *stash) fieldIdSFG(section SectionIdType, fieldName string) FieldIdType 
 			fid, ok := s.fields[section][fieldName]
 			if !ok {
 				fid = FieldIdType(len(s.fields[section]) + 1)
-				key := NewKey(section, metadaRecordId, fid)
+				key := NewKey(section, metadataRecordId, fid)
 				s.m.Store(key, fieldName)
 				s.put(key)
 				s.fields[section][fieldName] = fid
@@ -403,4 +410,35 @@ func (s *stash) Update(section SectionIdType, guid GUIDType, data map[string]any
 
 	s.sugar.Debugw("update", "guid", guid, "prevKey", prevKey)
 	return nil
+}
+
+// Find data
+func (s *stash) Find(ctx context.Context, section SectionIdType, f func(*map[string]any) bool) ([]Record, error) {
+	var founded []Record
+
+	s.recordsMu.Lock()
+	if s.records[section] == nil {
+		s.records[section] = make(map[GUIDType]Key) // todo: make all on start and remove lock
+	}
+	recordsInSection := s.records[section]
+	s.recordsMu.Unlock()
+
+	// todo: run s.Get in goroutines with context
+	for guid, key := range recordsInSection {
+		data, err := s.Get(section, guid)
+		if err != nil && !errors.Is(ErrRecordNotFound, err) {
+			return nil, err
+		}
+		if err != nil {
+			s.sugar.Warnw("get", "err", err)
+		}
+		if f == nil || f(&data) {
+			founded = append(founded, Record{
+				guid: guid,
+				key:  key,
+				data: data,
+			})
+		}
+	}
+	return founded, nil
 }
