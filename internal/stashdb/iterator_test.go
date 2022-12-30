@@ -1,4 +1,4 @@
-package storage
+package stashdb
 
 import (
 	"testing"
@@ -40,4 +40,7 @@ func Test_iterator_next(t *testing.T) {
 	require.EqualValues(t, false, flag)
 	require.EqualValues(t, true, it.node == nil)
 
+	it.end()
+	require.EqualValues(t, it.pos, end)
+	require.EqualValues(t, true, it.node == nil)
 }

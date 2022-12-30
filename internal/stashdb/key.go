@@ -1,4 +1,4 @@
-package storage
+package stashdb
 
 import (
 	"encoding/binary"

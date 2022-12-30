@@ -1,18 +1,13 @@
-package storage
+package stashdb
 
 import (
 	"fmt"
 	"log"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
-)
-
-const (
-	loggerSyncInterval = time.Second
 )
 
 var (

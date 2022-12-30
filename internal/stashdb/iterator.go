@@ -1,4 +1,4 @@
-package storage
+package stashdb
 
 // iterator holding the iterators state
 type iterator struct {
@@ -112,11 +112,6 @@ func (it *iterator) prev() bool {
 	it.node = nil
 	it.pos = begin
 	return false
-}
-
-// current returns the current element's node.
-func (it *iterator) current() *redBlackNode {
-	return it.node
 }
 
 // begin resets the iterator to one-before-first

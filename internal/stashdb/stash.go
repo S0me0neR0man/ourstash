@@ -1,4 +1,4 @@
-package storage
+package stashdb
 
 import (
 	"context"
@@ -37,9 +37,9 @@ type recordHeader struct {
 	guid      GUIDType
 	next      RecordIdType
 	operation OperationType
-	user      string
-	time      time.Time
-	deleted   bool
+	// user      string
+	time    time.Time
+	deleted bool
 }
 
 func newRecordHeader(op OperationType) recordHeader {
@@ -53,11 +53,10 @@ func newRecordHeader(op OperationType) recordHeader {
 
 type Record struct {
 	guid GUIDType
-	key  Key
 	data map[string]any
 }
 
-// stash the in-memory NoSQL key-value tread safe storage.
+// stash the in-memory NoSQL key-value tread safe stashdb.
 // Most important part - synthetic key (see Key type)
 type stash struct {
 	redBlackTree
@@ -95,37 +94,37 @@ func (s *stash) newId(section SectionIdType) RecordIdType {
 	return RecordIdType(atomic.AddUint64(aid.(*uint64), 1))
 }
 
-func (s *stash) findRecord(section SectionIdType, record RecordIdType, field FieldIdType) (*redBlackNode, bool) {
-	it := s.iterator()
-	for flag := it.next(); flag; flag = it.next() {
-		if it.node.key.Section() < section || it.node.key.Record() < record {
-			continue
-		}
-		if it.node.key.Section() == section && it.node.key.Record() == record && it.node.key.Field() == field {
-			return it.node, true
-		}
-		if (it.node.key.Section() == section && it.node.key.Record() > record) || it.node.key.Section() > section {
-			return nil, false
-		}
-	}
-	return nil, false
-}
+//func (s *stash) findRecord(section SectionIdType, record RecordIdType, field FieldIdType) (*redBlackNode, bool) {
+//	it := s.iterator()
+//	for flag := it.next(); flag; flag = it.next() {
+//		if it.node.key.Section() < section || it.node.key.Record() < record {
+//			continue
+//		}
+//		if it.node.key.Section() == section && it.node.key.Record() == record && it.node.key.Field() == field {
+//			return it.node, true
+//		}
+//		if (it.node.key.Section() == section && it.node.key.Record() > record) || it.node.key.Section() > section {
+//			return nil, false
+//		}
+//	}
+//	return nil, false
+//}
 
-func (s *stash) getStringValue(key Key) (string, error) {
-	const msg = "getStringValue:"
-	value, ok := s.m.Load(key)
-	if !ok {
-		return "", fmt.Errorf("%s key %s not found", msg, key.String())
-	}
-
-	var str string
-	str, ok = value.(string)
-	if !ok {
-		return "", fmt.Errorf("%s stored value is not string (key %s)", msg, key.String())
-	}
-
-	return str, nil
-}
+//func (s *stash) getStringValue(key Key) (string, error) {
+//	const msg = "getStringValue:"
+//	value, ok := s.m.Load(key)
+//	if !ok {
+//		return "", fmt.Errorf("%s key %s not found", msg, key.String())
+//	}
+//
+//	var str string
+//	str, ok = value.(string)
+//	if !ok {
+//		return "", fmt.Errorf("%s stored value is not string (key %s)", msg, key.String())
+//	}
+//
+//	return str, nil
+//}
 
 func (s *stash) getRecordHeader(key Key) (recordHeader, error) {
 	const msg = "getRecordHeader:"
@@ -313,7 +312,7 @@ func (s *stash) Insert(section SectionIdType, data map[string]any) GUIDType {
 	return guid
 }
 
-// Get record data
+// Get data
 func (s *stash) Get(section SectionIdType, guid GUIDType) (map[string]any, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -424,7 +423,7 @@ func (s *stash) Find(ctx context.Context, section SectionIdType, f func(*map[str
 	s.recordsMu.Unlock()
 
 	// todo: run s.Get in goroutines with context
-	for guid, key := range recordsInSection {
+	for guid := range recordsInSection {
 		data, err := s.Get(section, guid)
 		if err != nil && !errors.Is(ErrRecordNotFound, err) {
 			return nil, err
@@ -435,7 +434,6 @@ func (s *stash) Find(ctx context.Context, section SectionIdType, f func(*map[str
 		if f == nil || f(&data) {
 			founded = append(founded, Record{
 				guid: guid,
-				key:  key,
 				data: data,
 			})
 		}

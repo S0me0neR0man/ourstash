@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package grpcs;
+
+import "google/protobuf/any.proto";
+
+option go_package = "internal/grpcproto";
+
+message MapFieldData {
+  string key = 1;
+  google.protobuf.Any value = 2;
+}
+
+message InsertRequest {
+  uint32 section = 1;
+  repeated MapFieldData data = 2;
+}
+
+message InsertResponse {
+  string guid = 1;
+  string error = 2;
+}
+
+message GetRequest {
+  uint32 section = 1;
+  string guid = 2;
+}
+
+message GetResponse {
+  repeated MapFieldData data = 1;
+  string error = 2;
+}
+
+message RemoveRequest {
+  uint32 section = 1;
+  string guid = 2;
+}
+
+message RemoveResponse {
+  string error = 1;
+}
+
+message UpdateRequest {
+  uint32 section = 1;
+  string guid = 2;
+  repeated MapFieldData data = 1;
+}
+
+message UpdateResponse {
+  string error = 1;
+}
+
+service MetricsGRPC {
+  rpc Insert(InsertRequest) returns (InsertResponse);
+  rpc Get(GetRequest) returns (GetResponse);
+  rpc Remove(RemoveRequest) returns (RemoveResponse);
+  rpc Update(UpdateRequest) returns (UpdateResponse);
+}
+

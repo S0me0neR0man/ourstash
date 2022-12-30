@@ -1,4 +1,4 @@
-package storage
+package stashdb
 
 import (
 	"context"
@@ -38,8 +38,9 @@ func Test_stash_inGoroutines(t *testing.T) {
 	funcInsertGet := func(i int) {
 		defer wg.Done()
 		to := map[string]any{
-			"tag":                       "#tag" + strconv.Itoa(i),
-			"text":                      "sample text" + strconv.Itoa(i),
+			"tag":  "#tag" + strconv.Itoa(i),
+			"text": "sample text" + strconv.Itoa(i),
+
 			"int_val" + strconv.Itoa(i): i,
 		}
 
@@ -57,8 +58,9 @@ func Test_stash_inGoroutines(t *testing.T) {
 	funcInsertGetRemove := func(i int) {
 		defer wg.Done()
 		to := map[string]any{
-			"tag":                       "#tag" + strconv.Itoa(i),
-			"text":                      "sample text" + strconv.Itoa(i),
+			"tag":  "#tag" + strconv.Itoa(i),
+			"text": "sample text" + strconv.Itoa(i),
+
 			"int_val" + strconv.Itoa(i): i,
 		}
 
@@ -75,14 +77,15 @@ func Test_stash_inGoroutines(t *testing.T) {
 		require.NoError(t, err)
 
 		from, err = s.Get(1, recGuid)
-		require.Equal(t, ErrRecordNotFound, err)
+		require.Equal(t, ErrRecordNotFound, err, "%v", from)
 	}
 
 	funcInsertUpdateRemove := func(i int) {
 		defer wg.Done()
 		to := map[string]any{
-			"tag":                       "#tag" + strconv.Itoa(i),
-			"text":                      "sample text" + strconv.Itoa(i),
+			"tag":  "#tag" + strconv.Itoa(i),
+			"text": "sample text" + strconv.Itoa(i),
+
 			"int_val" + strconv.Itoa(i): i,
 		}
 
@@ -111,7 +114,7 @@ func Test_stash_inGoroutines(t *testing.T) {
 		require.NoError(t, err)
 
 		from, err = s.Get(1, recGuid)
-		require.Equal(t, ErrRecordNotFound, err)
+		require.Equal(t, ErrRecordNotFound, err, "%v", from)
 	}
 
 	for i := 0; i < goroutinesCount; i++ {
@@ -163,4 +166,3 @@ func Test_stash_Find(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 2, len(records))
 }
-
