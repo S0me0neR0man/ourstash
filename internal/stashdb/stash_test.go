@@ -10,7 +10,7 @@ import (
 )
 
 func Test_stash_Insert(t *testing.T) {
-	s := newStash(getTestLogger())
+	s := NewStash(getTestLogger())
 	require.NotNil(t, s)
 
 	to := map[string]any{
@@ -28,7 +28,7 @@ func Test_stash_Insert(t *testing.T) {
 }
 
 func Test_stash_inGoroutines(t *testing.T) {
-	s := newStash(getTestLogger())
+	s := NewStash(getTestLogger())
 	require.NotNil(t, s)
 
 	goroutinesCount := 100
@@ -128,7 +128,7 @@ func Test_stash_inGoroutines(t *testing.T) {
 }
 
 func Test_stash_Find(t *testing.T) {
-	s := newStash(getTestLogger())
+	s := NewStash(getTestLogger())
 	require.NotNil(t, s)
 
 	to := []map[string]any{
@@ -155,12 +155,12 @@ func Test_stash_Find(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	records, err := s.Find(ctx, 1, func(m *map[string]any) bool {
+	records, err := s.Find(ctx, 1, func(m *map[string]any) (bool, bool) {
 		val, ok := (*m)["int_val"]
 		if ok && val.(int) < 10 {
-			return true
+			return true, false
 		}
-		return false
+		return false, false
 	})
 
 	require.NoError(t, err)
