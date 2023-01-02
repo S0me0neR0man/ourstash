@@ -2,6 +2,7 @@ package stashserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 
@@ -51,29 +52,14 @@ func (ss *StashServer) Insert(ctx context.Context, in *grpcproto.InsertRequest) 
 	section, err := ss.getSection(in.Section)
 	if err != nil {
 		resp.Error = err.Error()
-		return &resp, err
+		return &resp, nil
 	}
 
-	data := make(map[string]any)
-	for field, val := range in.Data {
-		switch val.GetTypeUrl() {
-		case "type.googleapis.com/grpcs.IntData":
-			intData := &grpcproto.IntData{}
-			if err := val.UnmarshalTo(intData); err != nil {
-				resp.Error = err.Error()
-				return &resp, err
-			}
-			data[field] = intData.GetData()
-		case "type.googleapis.com/grpcs.StringData":
-			strData := &grpcproto.StringData{}
-			if err := val.UnmarshalTo(strData); err != nil {
-				resp.Error = err.Error()
-				return &resp, err
-			}
-			data[field] = strData.GetData()
-		default:
-			ss.sugar.Errorw("unknown", "TypeUrl", val.GetTypeUrl())
-		}
+	var data map[string]any
+	data, err = ss.toStashMap(in.Data)
+	if err != nil {
+		resp.Error = err.Error()
+		return nil, err
 	}
 	resp.Guid = string(ss.stash.Insert(section, data))
 
@@ -86,19 +72,19 @@ func (ss *StashServer) Get(ctx context.Context, in *grpcproto.GetRequest) (*grpc
 	section, err := ss.getSection(in.Section)
 	if err != nil {
 		resp.Error = err.Error()
-		return &resp, err
+		return &resp, nil
 	}
 
 	var data map[string]any
 	data, err = ss.stash.Get(section, stashdb.GUIDType(in.GetGuid()))
 	if err != nil {
 		resp.Error = err.Error()
-		return &resp, err
+		return &resp, nil
 	}
 
 	resp.Data = make(map[string]*anypb.Any)
 	for key, val := range data {
-		switch val.(type) {
+		switch i := val.(type) {
 		case int64:
 			a, err := anypb.New(&grpcproto.IntData{
 				Data: val.(int64),
@@ -117,6 +103,8 @@ func (ss *StashServer) Get(ctx context.Context, in *grpcproto.GetRequest) (*grpc
 				return &resp, err
 			}
 			resp.Data[key] = a
+		default:
+			ss.sugar.Warnw("get unsupported type", "value", i)
 		}
 	}
 	return &resp, nil
@@ -125,18 +113,73 @@ func (ss *StashServer) Get(ctx context.Context, in *grpcproto.GetRequest) (*grpc
 func (ss *StashServer) Update(ctx context.Context, in *grpcproto.UpdateRequest) (*grpcproto.UpdateResponse, error) {
 	var resp grpcproto.UpdateResponse
 
+	section, err := ss.getSection(in.Section)
+	if err != nil {
+		resp.Error = err.Error()
+		return &resp, nil
+	}
+
+	var data map[string]any
+	data, err = ss.toStashMap(in.Data)
+	if err != nil {
+		resp.Error = err.Error()
+		return nil, err
+	}
+	err = ss.stash.Update(section, stashdb.GUIDType(in.Guid), data)
+	if err != nil {
+		resp.Error = err.Error()
+	}
+
 	return &resp, nil
 }
 
 func (ss *StashServer) Remove(ctx context.Context, in *grpcproto.RemoveRequest) (*grpcproto.RemoveResponse, error) {
 	var resp grpcproto.RemoveResponse
 
+	section, err := ss.getSection(in.Section)
+	if err != nil {
+		resp.Error = err.Error()
+		return &resp, nil
+	}
+
+	err = ss.stash.Remove(section, stashdb.GUIDType(in.GetGuid()))
+	if err != nil {
+		resp.Error = err.Error()
+	}
+	if err != nil && !errors.Is(err, stashdb.ErrRecordNotFound) {
+		return &resp, err
+	}
+
 	return &resp, nil
 }
 
 func (ss *StashServer) getSection(in uint32) (stashdb.SectionIdType, error) {
-	if in > 254 {
-		return 0xff, fmt.Errorf("section must be < 255")
+	if in == 0 || in > 254 {
+		return 0xff, fmt.Errorf("section must be in [1 ... 254]")
 	}
 	return stashdb.SectionIdType(in), nil
+}
+
+func (ss *StashServer) toStashMap(in map[string]*anypb.Any) (map[string]any, error) {
+	out := make(map[string]any)
+	for field, val := range in {
+		switch val.GetTypeUrl() {
+		case "type.googleapis.com/grpcs.IntData":
+			intData := &grpcproto.IntData{}
+			if err := val.UnmarshalTo(intData); err != nil {
+				return nil, err
+			}
+			out[field] = intData.GetData()
+		case "type.googleapis.com/grpcs.StringData":
+			strData := &grpcproto.StringData{}
+			if err := val.UnmarshalTo(strData); err != nil {
+				return nil, err
+			}
+			out[field] = strData.GetData()
+		default:
+			ss.sugar.Errorw("unknown", "TypeUrl", val.GetTypeUrl())
+		}
+	}
+
+	return out, nil
 }

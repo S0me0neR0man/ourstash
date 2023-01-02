@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"os"
 	"os/signal"
 	"strconv"
 	"sync"
@@ -20,7 +21,8 @@ import (
 )
 
 const (
-	insertInterval = time.Millisecond * 100
+	insertInterval = time.Millisecond * 10
+	displayCounter = 100
 )
 
 type oneRecord struct {
@@ -28,6 +30,7 @@ type oneRecord struct {
 	guid    stashdb.GUIDType
 	data    map[string]*anypb.Any
 	deleted bool
+	updated bool
 }
 
 func newOneRecord() oneRecord {
@@ -35,6 +38,7 @@ func newOneRecord() oneRecord {
 	rec := oneRecord{
 		section: stashdb.SectionIdType(i + 1),
 		deleted: false,
+		updated: false,
 		data:    make(map[string]*anypb.Any),
 	}
 
@@ -77,13 +81,16 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 	defer stop()
 
-	toGet := make(chan oneRecord, 100)
+	toGet := make(chan oneRecord, 10)
+	toUpdate := make(chan oneRecord, 10)
+	toRemove := make(chan oneRecord, 10)
 
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(7)
 
-	go func(ctx context.Context) {
+	insertFunc := func(ctx context.Context) {
 		defer wg.Done()
+		count := 0
 		for {
 			select {
 			case <-ctx.Done():
@@ -96,14 +103,20 @@ func main() {
 					time.Sleep(insertInterval)
 					continue
 				}
+				count++
+				if count == displayCounter {
+					count = 0
+					_, _ = fmt.Fprint(os.Stdout, "I")
+				}
 				toGet <- rec
 				time.Sleep(insertInterval)
 			}
 		}
-	}(ctx)
+	}
 
-	go func(ctx context.Context) {
+	getFunc := func(ctx context.Context) {
 		defer wg.Done()
+		count := 0
 		for {
 			select {
 			case <-ctx.Done():
@@ -114,6 +127,14 @@ func main() {
 					log.Println(err)
 					continue
 				}
+				count++
+				if count == displayCounter {
+					count = 0
+					_, _ = fmt.Fprint(os.Stdout, "G")
+				}
+				if rec.deleted {
+					continue
+				}
 				if rec.guid != after.guid {
 					log.Printf("get error guid before=%s after=%s", rec.guid, after.guid)
 				}
@@ -122,9 +143,73 @@ func main() {
 						log.Printf("get error '%s' before=%v after=%v", field, val, after.data[field])
 					}
 				}
+				if rec.updated {
+					continue
+				}
+				if rand.Intn(2) == 0 {
+					toRemove <- rec
+				} else {
+					toUpdate <- rec
+				}
 			}
 		}
-	}(ctx)
+	}
+
+	updateFunc := func(ctx context.Context) {
+		defer wg.Done()
+		count := 0
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case rec := <-toUpdate:
+				err := update(ctx, c, rec)
+				if err != nil && !rec.deleted {
+					log.Println(err)
+					continue
+				}
+				rec.updated = true
+				toGet <- rec
+				count++
+				if count == displayCounter {
+					count = 0
+					_, _ = fmt.Fprint(os.Stdout, "U")
+				}
+			}
+		}
+	}
+
+	removeFunc := func(ctx context.Context) {
+		defer wg.Done()
+		count := 0
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case rec := <-toRemove:
+				err := remove(ctx, c, rec)
+				if err != nil && !rec.deleted {
+					log.Println(err)
+					continue
+				}
+				rec.deleted = true
+				toGet <- rec
+				count++
+				if count == displayCounter {
+					count = 0
+					_, _ = fmt.Fprint(os.Stdout, "R")
+				}
+			}
+		}
+	}
+
+	go insertFunc(ctx)
+	go insertFunc(ctx)
+	go getFunc(ctx)
+	go getFunc(ctx)
+	go getFunc(ctx)
+	go updateFunc(ctx)
+	go removeFunc(ctx)
 
 	wg.Wait()
 }
@@ -139,7 +224,7 @@ func get(ctx context.Context, c grpcproto.StashClient, rec oneRecord) (oneRecord
 		return oneRecord{}, fmt.Errorf("c.Get: %w", err)
 	}
 	if resp.Error != "" {
-		return oneRecord{}, fmt.Errorf("resp.Error: %s", resp.Error)
+		return oneRecord{}, fmt.Errorf("get resp.Error: %s", resp.Error)
 	}
 
 	rec.data = resp.Data
@@ -156,8 +241,41 @@ func insert(ctx context.Context, c grpcproto.StashClient, rec oneRecord) (stashd
 		return "", err
 	}
 	if resp.Error != "" {
-		return "", fmt.Errorf("resp.Error: %s", resp.Error)
+		return "", fmt.Errorf("insert resp.Error: %s", resp.Error)
 	}
 
 	return stashdb.GUIDType(resp.Guid), nil
+}
+
+func update(ctx context.Context, c grpcproto.StashClient, rec oneRecord) error {
+	resp, err := c.Update(ctx, &grpcproto.UpdateRequest{
+		Section: uint32(rec.section),
+		Guid:    string(rec.guid),
+		Data:    rec.data,
+	})
+
+	if err != nil {
+		return fmt.Errorf("c.Update: %w", err)
+	}
+	if resp.Error != "" {
+		return fmt.Errorf("update resp.Error: %s", resp.Error)
+	}
+
+	return nil
+}
+
+func remove(ctx context.Context, c grpcproto.StashClient, rec oneRecord) error {
+	resp, err := c.Remove(ctx, &grpcproto.RemoveRequest{
+		Section: uint32(rec.section),
+		Guid:    string(rec.guid),
+	})
+
+	if err != nil {
+		return fmt.Errorf("c.Remove: %w", err)
+	}
+	if resp.Error != "" {
+		return fmt.Errorf("remove resp.Error: %s", resp.Error)
+	}
+
+	return nil
 }
