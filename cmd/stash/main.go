@@ -18,8 +18,10 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	logger.Info("stash server starting on port 3200 ...")
+
 	stash := stashdb.NewStash(logger)
-	s := stashserver.NewStashServer(stash, logger)
+	server := stashserver.NewStashServer(stash, logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 	defer stop()
@@ -29,10 +31,10 @@ func main() {
 	go func(ctx context.Context) {
 		defer wg.Done()
 		<-ctx.Done()
-		s.GracefulStop()
+		server.GracefulStop()
 	}(ctx)
 
-	if err := s.Start(); err != nil {
+	if err := server.Start(); err != nil {
 		log.Println(err)
 	}
 

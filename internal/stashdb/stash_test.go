@@ -2,11 +2,17 @@ package stashdb
 
 import (
 	"context"
+	"math/rand"
 	"strconv"
 	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+)
+
+const (
+	countRecords        = 1000
+	countFieldsInRecord = 100
 )
 
 func Test_stash_Insert(t *testing.T) {
@@ -46,13 +52,13 @@ func Test_stash_inGoroutines(t *testing.T) {
 
 		recGuid := s.Insert(1, to)
 		keyInsert, err := s.recordKeySFG(1, recGuid)
-		require.NoError(t, err, "guid=%s err=%v", recGuid, err)
+		require.NoError(t, err, "Guid=%s err=%v", recGuid, err)
 		require.EqualValues(t, true, recGuid != "")
 
 		from, err := s.Get(1, recGuid)
-		require.NoError(t, err, "guid=%s keyInsert=%s", recGuid, keyInsert)
+		require.NoError(t, err, "Guid=%s keyInsert=%s", recGuid, keyInsert)
 		keyGet, _ := s.recordKeySFG(1, recGuid)
-		require.EqualValues(t, to, from, "guid=%s keyInsert=%s keyGet=%s", recGuid, keyInsert, keyGet)
+		require.EqualValues(t, to, from, "Guid=%s keyInsert=%s keyGet=%s", recGuid, keyInsert, keyGet)
 	}
 
 	funcInsertGetRemove := func(i int) {
@@ -71,7 +77,7 @@ func Test_stash_inGoroutines(t *testing.T) {
 		from, err := s.Get(1, recGuid)
 		require.NoError(t, err)
 		keyGet, _ := s.recordKeySFG(1, recGuid)
-		require.EqualValues(t, to, from, "guid=%s keyInsert=%s keyGet=%s", recGuid, keyInsert, keyGet)
+		require.EqualValues(t, to, from, "Guid=%s keyInsert=%s keyGet=%s", recGuid, keyInsert, keyGet)
 
 		err = s.Remove(1, recGuid)
 		require.NoError(t, err)
@@ -96,7 +102,7 @@ func Test_stash_inGoroutines(t *testing.T) {
 		from, err := s.Get(1, recGuid)
 		require.NoError(t, err)
 		keyGet, _ := s.recordKeySFG(1, recGuid)
-		require.EqualValues(t, to, from, "guid=%s keyInsert=%s keyGet=%s", recGuid, keyInsert, keyGet)
+		require.EqualValues(t, to, from, "Guid=%s keyInsert=%s keyGet=%s", recGuid, keyInsert, keyGet)
 
 		to2 := map[string]any{
 			"text":    "sample text" + strconv.Itoa(i),
@@ -165,4 +171,36 @@ func Test_stash_Find(t *testing.T) {
 
 	require.NoError(t, err)
 	require.EqualValues(t, 2, len(records))
+}
+
+func generateTestData() []map[string]any {
+	ret := make([]map[string]any, 0)
+	for i := 0; i < countRecords; i++ {
+		ret = append(ret, make(map[string]any))
+		for k := 0; k < countFieldsInRecord; k++ {
+			switch rand.Intn(2) {
+			case 0:
+				ret[i]["intVal_"+strconv.Itoa(k)] = k
+			case 1:
+				ret[i]["stringVal_"+strconv.Itoa(k)] = "test string " + strconv.Itoa(k)
+			}
+		}
+	}
+	return ret
+}
+
+func TestStash_SaveToDisk(t *testing.T) {
+	s := NewStash(getTestLogger())
+	require.NotNil(t, s)
+
+	to := generateTestData()
+
+	for _, m := range to {
+		recGuid := s.Insert(1, m)
+		require.EqualValues(t, true, recGuid != "")
+	}
+
+	ctx := context.Background()
+	err := s.SaveToDisk(ctx)
+	require.NoError(t, err)
 }
