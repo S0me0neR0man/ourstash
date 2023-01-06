@@ -3,6 +3,7 @@ package stashdb
 import (
 	"context"
 	"math/rand"
+	"os"
 	"strconv"
 	"sync"
 	"testing"
@@ -15,8 +16,22 @@ const (
 	countFieldsInRecord = 100
 )
 
+var (
+	onceToEnv sync.Once
+	conf      *Config
+)
+
+func getConfig() *Config {
+	onceToEnv.Do(func() {
+		_ = os.Setenv("STORE_FILE", "db/test_stash.data")
+		conf = NewConfig()
+	})
+	return conf
+}
+
 func Test_stash_Insert(t *testing.T) {
-	s := NewStash(getTestLogger())
+	s, err := NewStash(getConfig(), getTestLogger())
+	require.NoError(t, err)
 	require.NotNil(t, s)
 
 	to := map[string]any{
@@ -34,7 +49,8 @@ func Test_stash_Insert(t *testing.T) {
 }
 
 func Test_stash_inGoroutines(t *testing.T) {
-	s := NewStash(getTestLogger())
+	s, err := NewStash(getConfig(), getTestLogger())
+	require.NoError(t, err)
 	require.NotNil(t, s)
 
 	goroutinesCount := 100
@@ -51,13 +67,13 @@ func Test_stash_inGoroutines(t *testing.T) {
 		}
 
 		recGuid := s.Insert(1, to)
-		keyInsert, err := s.recordKeySFG(1, recGuid)
+		keyInsert, err := s.recordKeySFG(recGuid)
 		require.NoError(t, err, "Guid=%s err=%v", recGuid, err)
 		require.EqualValues(t, true, recGuid != "")
 
 		from, err := s.Get(1, recGuid)
 		require.NoError(t, err, "Guid=%s keyInsert=%s", recGuid, keyInsert)
-		keyGet, _ := s.recordKeySFG(1, recGuid)
+		keyGet, _ := s.recordKeySFG(recGuid)
 		require.EqualValues(t, to, from, "Guid=%s keyInsert=%s keyGet=%s", recGuid, keyInsert, keyGet)
 	}
 
@@ -71,12 +87,12 @@ func Test_stash_inGoroutines(t *testing.T) {
 		}
 
 		recGuid := s.Insert(1, to)
-		keyInsert, _ := s.recordKeySFG(1, recGuid)
+		keyInsert, _ := s.recordKeySFG(recGuid)
 		require.EqualValues(t, true, recGuid != "")
 
 		from, err := s.Get(1, recGuid)
 		require.NoError(t, err)
-		keyGet, _ := s.recordKeySFG(1, recGuid)
+		keyGet, _ := s.recordKeySFG(recGuid)
 		require.EqualValues(t, to, from, "Guid=%s keyInsert=%s keyGet=%s", recGuid, keyInsert, keyGet)
 
 		err = s.Remove(1, recGuid)
@@ -96,12 +112,12 @@ func Test_stash_inGoroutines(t *testing.T) {
 		}
 
 		recGuid := s.Insert(1, to)
-		keyInsert, _ := s.recordKeySFG(1, recGuid)
+		keyInsert, _ := s.recordKeySFG(recGuid)
 		require.EqualValues(t, true, recGuid != "")
 
 		from, err := s.Get(1, recGuid)
 		require.NoError(t, err)
-		keyGet, _ := s.recordKeySFG(1, recGuid)
+		keyGet, _ := s.recordKeySFG(recGuid)
 		require.EqualValues(t, to, from, "Guid=%s keyInsert=%s keyGet=%s", recGuid, keyInsert, keyGet)
 
 		to2 := map[string]any{
@@ -134,7 +150,8 @@ func Test_stash_inGoroutines(t *testing.T) {
 }
 
 func Test_stash_Find(t *testing.T) {
-	s := NewStash(getTestLogger())
+	s, err := NewStash(getConfig(), getTestLogger())
+	require.NoError(t, err)
 	require.NotNil(t, s)
 
 	to := []map[string]any{
@@ -190,7 +207,7 @@ func generateTestData() []map[string]any {
 }
 
 func TestStash_SaveToDisk(t *testing.T) {
-	s := NewStash(getTestLogger())
+	s, err := NewStash(getConfig(), getTestLogger())
 	require.NotNil(t, s)
 
 	to := generateTestData()
@@ -201,6 +218,7 @@ func TestStash_SaveToDisk(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := s.SaveToDisk(ctx)
+	err = s.saveToDisk(ctx)
 	require.NoError(t, err)
 }
+

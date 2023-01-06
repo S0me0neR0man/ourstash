@@ -31,8 +31,6 @@ const (
 
 	InsertOperation OperationType = "insert"
 	UpdateOperation OperationType = "update"
-
-	fileName = "db/stash.data"
 )
 
 var (
@@ -74,20 +72,24 @@ type Stash struct {
 	fieldsSFG singleflight.Group
 	fieldsMu  sync.Mutex
 
-	records    map[SectionIdType]map[GUIDType]Key
+	records    map[GUIDType]Key
 	recordsSFG singleflight.Group
-	recordsMu  sync.Mutex
+	recordsMu  sync.RWMutex
 
+	conf  *Config
 	sugar *zap.SugaredLogger
 }
 
-func NewStash(logger *zap.Logger) *Stash {
-	return &Stash{
+func NewStash(conf *Config, logger *zap.Logger) (*Stash, error) {
+	s := Stash{
 		redBlackTree: redBlackTree{},
+		conf:         conf,
 		sugar:        logger.Sugar(),
 		fields:       make(map[SectionIdType]map[string]FieldIdType, 0),
-		records:      make(map[SectionIdType]map[GUIDType]Key, 0),
+		records:      make(map[GUIDType]Key, 0),
 	}
+
+	return &s, nil
 }
 
 func (s *Stash) newId(section SectionIdType) RecordIdType {
@@ -149,8 +151,8 @@ func (s *Stash) getRecordHeader(key Key) (recordHeader, error) {
 	return header, nil
 }
 
-func (s *Stash) fieldIdSFG(section SectionIdType, fieldName string) FieldIdType {
-	res, err, shared := s.fieldsSFG.Do(
+func (s *Stash) fieldIdSFG(section SectionIdType, fieldName string) (FieldIdType, error) {
+	res, err, _ := s.fieldsSFG.Do(
 		string(section)+fieldName,
 		func() (interface{}, error) {
 			s.fieldsMu.Lock()
@@ -171,15 +173,11 @@ func (s *Stash) fieldIdSFG(section SectionIdType, fieldName string) FieldIdType 
 			return fid, nil
 		})
 
-	if err != nil {
-		s.sugar.Errorw("fieldIdSFG", "res", res, "err", err, "shared", shared)
-	}
-
-	return res.(FieldIdType)
+	return res.(FieldIdType), err
 }
 
 func (s *Stash) fieldNameSFG(section SectionIdType, fieldId FieldIdType) (string, error) {
-	res, err, shared := s.fieldsSFG.Do(
+	res, err, _ := s.fieldsSFG.Do(
 		string(section)+"-"+strconv.Itoa(int(fieldId)),
 		func() (interface{}, error) {
 			s.fieldsMu.Lock()
@@ -198,89 +196,56 @@ func (s *Stash) fieldNameSFG(section SectionIdType, fieldId FieldIdType) (string
 			return "", ErrFieldNotFound
 		})
 
-	if err != nil {
-		if !errors.Is(ErrFieldNotFound, err) {
-			s.sugar.Errorw("fieldNameSFG", "res", res, "err", err, "shared", shared)
-		}
-		return "", err
-	}
-	return res.(string), nil
+	return res.(string), err
 }
 
-func (s *Stash) recordKeySFG(section SectionIdType, guid GUIDType) (Key, error) {
-	res, err, shared := s.recordsSFG.Do(
-		string(section)+string(guid),
+func (s *Stash) recordKeySFG(guid GUIDType) (Key, error) {
+	res, err, _ := s.recordsSFG.Do(
+		string(guid),
 		func() (interface{}, error) {
-			s.recordsMu.Lock()
-			if s.records[section] == nil {
-				s.records[section] = make(map[GUIDType]Key) // todo: make all on start and remove lock
-				s.recordsMu.Unlock()
-				return Key{}, ErrRecordNotFound
-			}
-			s.recordsMu.Unlock()
+			s.recordsMu.RLock()
+			defer s.recordsMu.RUnlock()
 
-			recKey, ok := s.records[section][guid]
+			recKey, ok := s.records[guid]
 			if !ok {
 				return Key{}, ErrRecordNotFound
 			}
 			return recKey, nil
 		})
 
-	if err != nil {
-		if !errors.Is(ErrRecordNotFound, err) {
-			s.sugar.Errorw("recordKeySFG", "res", res, "err", err, "shared", shared)
-		}
-		return res.(Key), err
-	}
-	return res.(Key), nil
+	return res.(Key), err
 }
 
-func (s *Stash) recordAddSFG(section SectionIdType, guid GUIDType, recKey Key) {
-	res, err, shared := s.recordsSFG.Do(
-		string(section)+string(guid),
+func (s *Stash) recordAddSFG(guid GUIDType, recKey Key) (Key, error) {
+	res, err, _ := s.recordsSFG.Do(
+		string(guid),
 		func() (interface{}, error) {
 			s.recordsMu.Lock()
 			defer s.recordsMu.Unlock()
 
-			if s.records[section] == nil {
-				s.records[section] = make(map[GUIDType]Key)
-			}
-
-			s.records[section][guid] = recKey
+			s.records[guid] = recKey
 			return recKey, nil
 		})
 
-	if err != nil {
-		s.sugar.Errorw("recordAddSFG", "res", res, "err", err, "shared", shared)
-	}
+	return res.(Key), err
 }
 
-func (s *Stash) recordRemoveSFG(section SectionIdType, guid GUIDType) (Key, error) {
-	res, err, shared := s.recordsSFG.Do(
-		"remove"+string(section)+string(guid),
+func (s *Stash) recordRemoveSFG(guid GUIDType) (Key, error) {
+	res, err, _ := s.recordsSFG.Do(
+		"remove"+string(guid),
 		func() (interface{}, error) {
 			s.recordsMu.Lock()
 			defer s.recordsMu.Unlock()
 
-			if s.records[section] == nil {
-				s.records[section] = make(map[GUIDType]Key)
-			}
-
-			recKey, ok := s.records[section][guid]
+			recKey, ok := s.records[guid]
 			if !ok {
 				return Key{}, ErrRecordNotFound
 			}
-			delete(s.records[section], guid)
+			delete(s.records, guid)
 			return recKey, nil
 		})
 
-	if err != nil {
-		if !errors.Is(ErrRecordNotFound, err) {
-			s.sugar.Errorw("recordRemoveSFG", "res", res, "err", err, "shared", shared)
-		}
-		return res.(Key), err
-	}
-	return res.(Key), nil
+	return res.(Key), err
 }
 
 func (s *Stash) putHeader(section SectionIdType, f func() recordHeader) (GUIDType, RecordIdType) {
@@ -288,7 +253,10 @@ func (s *Stash) putHeader(section SectionIdType, f func() recordHeader) (GUIDTyp
 	key := NewKey(section, recId, headerFieldId)
 	header := f()
 	s.m.Store(key, header)
-	s.recordAddSFG(section, header.Guid, key)
+	_, err := s.recordAddSFG(header.Guid, key)
+	if err != nil {
+		s.sugar.Errorw("recordAddSFG", "error", err)
+	}
 	s.put(key)
 
 	s.sugar.Debugw("put header", "Operation", header.Operation, "Guid", header.Guid, "key", key)
@@ -297,12 +265,30 @@ func (s *Stash) putHeader(section SectionIdType, f func() recordHeader) (GUIDTyp
 
 func (s *Stash) putData(section SectionIdType, recId RecordIdType, data map[string]any) {
 	for name, value := range data {
-		fid := s.fieldIdSFG(section, name)
+		fid, err := s.fieldIdSFG(section, name)
+		if err != nil {
+			s.sugar.Errorw("fieldIdSFG", "error", err)
+			continue
+		}
 		key := NewKey(section, recId, fid)
 		s.m.Store(key, value)
 		s.put(key)
 		s.sugar.Debugw("put data", "name", name, "key", key)
 	}
+}
+
+func (s *Stash) copyData(ctx context.Context) map[Key]any {
+	ret := make(map[Key]any)
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	s.m.Range(func(key, value any) bool {
+		ret[key.(Key)] = value
+		return true
+	})
+
+	return ret
 }
 
 // Insert data
@@ -324,7 +310,7 @@ func (s *Stash) Get(section SectionIdType, guid GUIDType) (map[string]any, error
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	key, err := s.recordKeySFG(section, guid)
+	key, err := s.recordKeySFG(guid)
 	if err != nil {
 		return nil, err
 	}
@@ -369,7 +355,7 @@ func (s *Stash) Remove(section SectionIdType, guid GUIDType) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	key, err := s.recordRemoveSFG(section, guid)
+	key, err := s.recordRemoveSFG(guid)
 	if err != nil {
 		return err
 	}
@@ -391,7 +377,7 @@ func (s *Stash) Update(section SectionIdType, guid GUIDType, data map[string]any
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	prevKey, err := s.recordKeySFG(section, guid)
+	prevKey, err := s.recordKeySFG(guid)
 	if err != nil {
 		return err
 	}
@@ -422,16 +408,13 @@ func (s *Stash) Update(section SectionIdType, guid GUIDType, data map[string]any
 func (s *Stash) Find(ctx context.Context, section SectionIdType, f func(*map[string]any) (bool, bool)) ([]Record, error) {
 	var founded []Record
 
-	s.recordsMu.Lock()
-	if s.records[section] == nil {
-		s.records[section] = make(map[GUIDType]Key) // todo: make all on start (init) and remove lock
-	}
-	recordsInSection := s.records[section]
-	s.recordsMu.Unlock()
+	s.recordsMu.RLock()
+	recordsInSection := s.records
+	s.recordsMu.RUnlock()
 
 	// todo: run s.Get in goroutines with context
 	for guid := range recordsInSection {
-		data, err := s.Get(section, guid)
+		datas, err := s.Get(section, guid)
 		if err != nil && !errors.Is(ErrRecordNotFound, err) {
 			return nil, err
 		}
@@ -441,13 +424,13 @@ func (s *Stash) Find(ctx context.Context, section SectionIdType, f func(*map[str
 
 		ok, stop := true, false
 		if f != nil {
-			ok, stop = f(&data)
+			ok, stop = f(&datas)
 		}
 
 		if ok {
 			founded = append(founded, Record{
 				guid: guid,
-				data: data,
+				data: datas,
 			})
 		}
 
@@ -458,10 +441,10 @@ func (s *Stash) Find(ctx context.Context, section SectionIdType, f func(*map[str
 	return founded, nil
 }
 
-// SaveToDisk save data to disk
-func (s *Stash) SaveToDisk(ctx context.Context) error {
+// saveToDisk save data to disk
+func (s *Stash) saveToDisk(ctx context.Context) error {
 	m := s.copyData(ctx)
-	file, err := os.OpenFile(data.Path(fileName), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0755)
+	file, err := os.OpenFile(data.Path(s.conf.StoreFile), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0755)
 	if err != nil {
 		return err
 	}
@@ -472,18 +455,4 @@ func (s *Stash) SaveToDisk(ctx context.Context) error {
 	}
 
 	return nil
-}
-
-func (s *Stash) copyData(ctx context.Context) map[Key]any {
-	ret := make(map[Key]any)
-
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	s.m.Range(func(key, value any) bool {
-		ret[key.(Key)] = value
-		return true
-	})
-
-	return ret
 }
