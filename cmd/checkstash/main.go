@@ -12,12 +12,14 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/oauth2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"ourstash/internal/grpcproto"
 	"ourstash/internal/stashdb"
+	"ourstash/internal/token"
 )
 
 const (
@@ -70,7 +72,14 @@ func newOneRecord() oneRecord {
 }
 
 func main() {
-	conn, err := grpc.Dial(":3200", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	// Set up the credentials for the connection.
+	// perRPC := oauth.TokenSource{TokenSource: oauth2.StaticTokenSource(fetchToken())}
+	opts := []grpc.DialOption{
+		grpc.WithPerRPCCredentials(&token.Tokens{}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	}
+
+	conn, err := grpc.Dial(":3200", opts...)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -278,4 +287,13 @@ func remove(ctx context.Context, c grpcproto.StashClient, rec oneRecord) error {
 	}
 
 	return nil
+}
+
+// fetchToken simulates a token lookup and omits the details of proper token
+// acquisition. For examples of how to acquire an OAuth2 token, see:
+// https://godoc.org/golang.org/x/oauth2
+func fetchToken() *oauth2.Token {
+	return &oauth2.Token{
+		AccessToken: "some-secret-token",
+	}
 }

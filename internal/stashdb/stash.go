@@ -2,8 +2,10 @@ package stashdb
 
 import (
 	"context"
+	"encoding/gob"
 	"errors"
 	"fmt"
+	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -12,6 +14,8 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
+
+	"ourstash/data"
 )
 
 type OperationType string
@@ -27,6 +31,8 @@ const (
 
 	InsertOperation OperationType = "insert"
 	UpdateOperation OperationType = "update"
+
+	fileName = "db/stash.data"
 )
 
 var (
@@ -36,20 +42,19 @@ var (
 )
 
 type recordHeader struct {
-	guid      GUIDType
-	next      RecordIdType
-	operation OperationType
-	// user      string
-	time    time.Time
-	deleted bool
+	Guid      GUIDType
+	Next      RecordIdType
+	Operation OperationType
+	OpTime    time.Time
+	Deleted   bool
 }
 
 func newRecordHeader(op OperationType) recordHeader {
 	return recordHeader{
-		guid:      GUIDType(uuid.New().String()),
-		time:      time.Now(),
-		deleted:   false,
-		operation: op,
+		Guid:      GUIDType(uuid.New().String()),
+		OpTime:    time.Now(),
+		Deleted:   false,
+		Operation: op,
 	}
 }
 
@@ -98,7 +103,7 @@ func (s *Stash) newId(section SectionIdType) RecordIdType {
 
 //func (s *Stash) findRecord(section SectionIdType, record RecordIdType, field FieldIdType) (*redBlackNode, bool) {
 //	it := s.iterator()
-//	for flag := it.next(); flag; flag = it.next() {
+//	for flag := it.Next(); flag; flag = it.Next() {
 //		if it.node.key.Section() < section || it.node.key.Record() < record {
 //			continue
 //		}
@@ -283,11 +288,11 @@ func (s *Stash) putHeader(section SectionIdType, f func() recordHeader) (GUIDTyp
 	key := NewKey(section, recId, headerFieldId)
 	header := f()
 	s.m.Store(key, header)
-	s.recordAddSFG(section, header.guid, key)
+	s.recordAddSFG(section, header.Guid, key)
 	s.put(key)
 
-	s.sugar.Debugw("put header", "operation", header.operation, "guid", header.guid, "key", key)
-	return header.guid, recId
+	s.sugar.Debugw("put header", "Operation", header.Operation, "Guid", header.Guid, "key", key)
+	return header.Guid, recId
 }
 
 func (s *Stash) putData(section SectionIdType, recId RecordIdType, data map[string]any) {
@@ -323,7 +328,7 @@ func (s *Stash) Get(section SectionIdType, guid GUIDType) (map[string]any, error
 	if err != nil {
 		return nil, err
 	}
-	s.sugar.Debugw("get", "guid", guid, "key", key)
+	s.sugar.Debugw("get", "Guid", guid, "key", key)
 
 	node := s.get(key)
 	if node == nil {
@@ -368,14 +373,14 @@ func (s *Stash) Remove(section SectionIdType, guid GUIDType) error {
 	if err != nil {
 		return err
 	}
-	s.sugar.Debugw("remove", "guid", guid, "key", key)
+	s.sugar.Debugw("remove", "Guid", guid, "key", key)
 
 	var header recordHeader
 	header, err = s.getRecordHeader(key)
 	if err != nil {
 		return err
 	}
-	header.deleted = true
+	header.Deleted = true
 	s.m.Store(key, header)
 
 	return nil
@@ -396,20 +401,20 @@ func (s *Stash) Update(section SectionIdType, guid GUIDType, data map[string]any
 	if err != nil {
 		return err
 	}
-	prevHeader.deleted = true
-	prevHeader.time = time.Now()
+	prevHeader.Deleted = true
+	prevHeader.OpTime = time.Now()
 
 	guid, recId := s.putHeader(section, func() recordHeader {
 		header := newRecordHeader(UpdateOperation)
-		header.guid = guid
+		header.Guid = guid
 		return header
 	})
 	s.putData(section, recId, data)
 
-	prevHeader.next = recId
+	prevHeader.Next = recId
 	s.m.Store(prevKey, prevHeader)
 
-	s.sugar.Debugw("update", "guid", guid, "prevKey", prevKey)
+	s.sugar.Debugw("update", "Guid", guid, "prevKey", prevKey)
 	return nil
 }
 
@@ -419,7 +424,7 @@ func (s *Stash) Find(ctx context.Context, section SectionIdType, f func(*map[str
 
 	s.recordsMu.Lock()
 	if s.records[section] == nil {
-		s.records[section] = make(map[GUIDType]Key) // todo: make all on start and remove lock
+		s.records[section] = make(map[GUIDType]Key) // todo: make all on start (init) and remove lock
 	}
 	recordsInSection := s.records[section]
 	s.recordsMu.Unlock()
@@ -451,4 +456,34 @@ func (s *Stash) Find(ctx context.Context, section SectionIdType, f func(*map[str
 		}
 	}
 	return founded, nil
+}
+
+// SaveToDisk save data to disk
+func (s *Stash) SaveToDisk(ctx context.Context) error {
+	m := s.copyData(ctx)
+	file, err := os.OpenFile(data.Path(fileName), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0755)
+	if err != nil {
+		return err
+	}
+	gob.Register(recordHeader{})
+	err = gob.NewEncoder(file).Encode(m)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *Stash) copyData(ctx context.Context) map[Key]any {
+	ret := make(map[Key]any)
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	s.m.Range(func(key, value any) bool {
+		ret[key.(Key)] = value
+		return true
+	})
+
+	return ret
 }

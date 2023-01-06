@@ -8,11 +8,21 @@ import (
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"ourstash/internal/grpcproto"
 	"ourstash/internal/stashdb"
 )
+
+var (
+	errMissingMetadata = status.Errorf(codes.InvalidArgument, "missing metadata")
+	errInvalidToken    = status.Errorf(codes.Unauthenticated, "invalid token")
+)
+
+const ()
 
 type StashServer struct {
 	grpcproto.UnimplementedStashServer
@@ -30,20 +40,44 @@ func NewStashServer(stash *stashdb.Stash, logger *zap.Logger) *StashServer {
 }
 
 func (ss *StashServer) Start() error {
-	listen, err := net.Listen("tcp", "127.0.0.1:3200")
+	opts := []grpc.ServerOption{
+		grpc.UnaryInterceptor(ss.ensureValidToken),
+	}
+
+	ss.gserv = grpc.NewServer(opts...)
+	grpcproto.RegisterStashServer(ss.gserv, ss)
+	ss.sugar.Infow("gprcserver start")
+
+	lis, err := net.Listen("tcp", "127.0.0.1:3200")
 	if err != nil {
 		return err
 	}
 
-	ss.gserv = grpc.NewServer()
-	grpcproto.RegisterStashServer(ss.gserv, ss)
-	ss.sugar.Infow("gprcserver start")
+	return ss.gserv.Serve(lis)
+}
 
-	return ss.gserv.Serve(listen)
+func (ss *StashServer) saveData() {
+
 }
 
 func (ss *StashServer) GracefulStop() {
+	ss.saveData()
 	ss.gserv.GracefulStop()
+}
+
+func (ss *StashServer) ensureValidToken(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return nil, errMissingMetadata
+	}
+	ss.sugar.Infow("ensureValidToken", "token", md["authorization"])
+	// The keys within metadata.MD are normalized to lowercase.
+	// See: https://godoc.org/google.golang.org/grpc/metadata#New
+	//if !valid(md["authorization"]) {
+	//	return nil, errInvalidToken
+	//}
+	// Continue execution of handler after ensuring a valid token.
+	return handler(ctx, req)
 }
 
 func (ss *StashServer) Insert(ctx context.Context, in *grpcproto.InsertRequest) (*grpcproto.InsertResponse, error) {
