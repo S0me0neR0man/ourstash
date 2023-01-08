@@ -1,5 +1,5 @@
 .idea
-data/db/*
-data/4226/*
+data/db/stash.data
+data/4226/google.key
 data/x509/*
 
