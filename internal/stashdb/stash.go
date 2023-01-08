@@ -9,28 +9,41 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
 
 	"ourstash/data"
+	"ourstash/internal/config"
 )
 
-type OperationType string
+type OperationType int
+
+const (
+	InsertOperation OperationType = iota
+	UpdateOperation
+)
+
+func (o OperationType) String() string {
+	switch o {
+	case InsertOperation:
+		return "insert"
+	case UpdateOperation:
+		return "update"
+	}
+	return "unknown"
+}
+
 type GUIDType string
 
 const (
 	//	metadataSection  SectionIdType = 0
 	//  usersRecord RecordIdType = 1
 
-	metadataRecordId RecordIdType = 0
-	counterFieldId   FieldIdType  = 0
-	headerFieldId    FieldIdType  = 0
-
-	InsertOperation OperationType = "insert"
-	UpdateOperation OperationType = "update"
+	systemRecordId       RecordIdType = 0
+	autoincrementFieldId FieldIdType  = 0
+	recordHeaderFieldId  FieldIdType  = 0
 )
 
 var (
@@ -43,14 +56,12 @@ type recordHeader struct {
 	Guid      GUIDType
 	Next      RecordIdType
 	Operation OperationType
-	OpTime    time.Time
 	Deleted   bool
 }
 
 func newRecordHeader(op OperationType) recordHeader {
 	return recordHeader{
 		Guid:      GUIDType(uuid.New().String()),
-		OpTime:    time.Now(),
 		Deleted:   false,
 		Operation: op,
 	}
@@ -76,11 +87,13 @@ type Stash struct {
 	recordsSFG singleflight.Group
 	recordsMu  sync.RWMutex
 
-	conf  *Config
+	conf  *config.Config
 	sugar *zap.SugaredLogger
+
+	onceInit sync.Once
 }
 
-func NewStash(conf *Config, logger *zap.Logger) (*Stash, error) {
+func NewStash(conf *config.Config, logger *zap.Logger) (*Stash, error) {
 	s := Stash{
 		redBlackTree: redBlackTree{},
 		conf:         conf,
@@ -89,11 +102,22 @@ func NewStash(conf *Config, logger *zap.Logger) (*Stash, error) {
 		records:      make(map[GUIDType]Key, 0),
 	}
 
+	s.onceInit.Do(func() {
+		gob.Register(recordHeader{})
+	})
+
+	if s.conf.Restore {
+		err := s.loadFromDisk()
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return &s, nil
 }
 
 func (s *Stash) newId(section SectionIdType) RecordIdType {
-	key := NewKey(section, metadataRecordId, counterFieldId)
+	key := NewKey(section, systemRecordId, autoincrementFieldId)
 	var firstId uint64 = 1
 	aid, loaded := s.m.LoadOrStore(key, &firstId)
 	if !loaded {
@@ -165,7 +189,7 @@ func (s *Stash) fieldIdSFG(section SectionIdType, fieldName string) (FieldIdType
 			fid, ok := s.fields[section][fieldName]
 			if !ok {
 				fid = FieldIdType(len(s.fields[section]) + 1)
-				key := NewKey(section, metadataRecordId, fid)
+				key := NewKey(section, systemRecordId, fid)
 				s.m.Store(key, fieldName)
 				s.put(key)
 				s.fields[section][fieldName] = fid
@@ -250,7 +274,7 @@ func (s *Stash) recordRemoveSFG(guid GUIDType) (Key, error) {
 
 func (s *Stash) putHeader(section SectionIdType, f func() recordHeader) (GUIDType, RecordIdType) {
 	recId := s.newId(section)
-	key := NewKey(section, recId, headerFieldId)
+	key := NewKey(section, recId, recordHeaderFieldId)
 	header := f()
 	s.m.Store(key, header)
 	_, err := s.recordAddSFG(header.Guid, key)
@@ -277,6 +301,8 @@ func (s *Stash) putData(section SectionIdType, recId RecordIdType, data map[stri
 	}
 }
 
+// copyData in new map
+// ATTENTION: lock data
 func (s *Stash) copyData(ctx context.Context) map[Key]any {
 	ret := make(map[Key]any)
 
@@ -306,7 +332,7 @@ func (s *Stash) Insert(section SectionIdType, data map[string]any) GUIDType {
 }
 
 // Get data
-func (s *Stash) Get(section SectionIdType, guid GUIDType) (map[string]any, error) {
+func (s *Stash) Get(guid GUIDType) (map[string]any, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -325,14 +351,14 @@ func (s *Stash) Get(section SectionIdType, guid GUIDType) (map[string]any, error
 	res := make(map[string]any)
 	it := s.iteratorAt(node)
 	for it.pos == onmyway {
-		if it.node.key.Section() != section || it.node.key.Record() != recId {
+		if it.node.key.Section() != key.Section() || it.node.key.Record() != recId {
 			break
 		}
-		if it.node.key.Field() == headerFieldId {
+		if it.node.key.Field() == recordHeaderFieldId {
 			it.next()
 			continue
 		}
-		name, err := s.fieldNameSFG(section, it.node.key.Field())
+		name, err := s.fieldNameSFG(key.Section(), it.node.key.Field())
 		if err != nil {
 			s.sugar.Debugw("fieldNameSFG", "err", err)
 			return nil, err
@@ -351,7 +377,7 @@ func (s *Stash) Get(section SectionIdType, guid GUIDType) (map[string]any, error
 }
 
 // Remove data
-func (s *Stash) Remove(section SectionIdType, guid GUIDType) error {
+func (s *Stash) Remove(guid GUIDType) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -373,7 +399,7 @@ func (s *Stash) Remove(section SectionIdType, guid GUIDType) error {
 }
 
 // Update data
-func (s *Stash) Update(section SectionIdType, guid GUIDType, data map[string]any) error {
+func (s *Stash) Update(guid GUIDType, data map[string]any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -388,14 +414,13 @@ func (s *Stash) Update(section SectionIdType, guid GUIDType, data map[string]any
 		return err
 	}
 	prevHeader.Deleted = true
-	prevHeader.OpTime = time.Now()
 
-	guid, recId := s.putHeader(section, func() recordHeader {
+	guid, recId := s.putHeader(prevKey.Section(), func() recordHeader {
 		header := newRecordHeader(UpdateOperation)
 		header.Guid = guid
 		return header
 	})
-	s.putData(section, recId, data)
+	s.putData(prevKey.Section(), recId, data)
 
 	prevHeader.Next = recId
 	s.m.Store(prevKey, prevHeader)
@@ -414,7 +439,7 @@ func (s *Stash) Find(ctx context.Context, section SectionIdType, f func(*map[str
 
 	// todo: run s.Get in goroutines with context
 	for guid := range recordsInSection {
-		datas, err := s.Get(section, guid)
+		datas, err := s.Get(guid)
 		if err != nil && !errors.Is(ErrRecordNotFound, err) {
 			return nil, err
 		}
@@ -441,17 +466,58 @@ func (s *Stash) Find(ctx context.Context, section SectionIdType, f func(*map[str
 	return founded, nil
 }
 
-// saveToDisk save data to disk
-func (s *Stash) saveToDisk(ctx context.Context) error {
+// SaveToDisk save data to disk
+//
+// TODO: redesign this
+func (s *Stash) SaveToDisk(ctx context.Context) error {
 	m := s.copyData(ctx)
 	file, err := os.OpenFile(data.Path(s.conf.StoreFile), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0755)
 	if err != nil {
 		return err
 	}
-	gob.Register(recordHeader{})
-	err = gob.NewEncoder(file).Encode(m)
+	defer func() {
+		err2 := file.Close()
+		if err2 != nil {
+			s.sugar.Errorw("SaveToDisk file.Close", "error", err2)
+		}
+	}()
+
+	err = gob.NewEncoder(file).Encode(&m)
 	if err != nil {
 		return err
+	}
+
+	return nil
+}
+
+// loadFromDisk load data from disk
+//
+// TODO: redesign this
+func (s *Stash) loadFromDisk() error {
+	file, err := os.OpenFile(data.Path(s.conf.StoreFile), os.O_RDONLY, 0755)
+	if err != nil {
+		return err
+	}
+
+	var m map[Key]any
+	err = gob.NewDecoder(file).Decode(&m)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for key, val := range m {
+		if key.Record() == 0x0 && key.Field() == 0x0 {
+			// todo: remove workaround
+			uv := val.(uint64)
+			s.m.Store(key, &uv)
+			s.put(key)
+			continue
+		}
+		s.m.Store(key, val)
+		s.put(key)
 	}
 
 	return nil

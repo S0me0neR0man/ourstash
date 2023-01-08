@@ -1,4 +1,4 @@
-package stashdb
+package config
 
 import (
 	"flag"
@@ -7,7 +7,7 @@ import (
 
 type Config struct {
 	StoreFile     string
-	StoreInterval time.Duration
+	StoreInterval time.Duration // 0 - disable save data
 	Restore       bool
 }
 

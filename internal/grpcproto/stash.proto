@@ -25,8 +25,7 @@ message InsertResponse {
 }
 
 message GetRequest {
-  uint32 section = 1;
-  string guid = 2;
+  string guid = 1;
 }
 
 message GetResponse {
@@ -35,8 +34,7 @@ message GetResponse {
 }
 
 message RemoveRequest {
-  uint32 section = 1;
-  string guid = 2;
+  string guid = 1;
 }
 
 message RemoveResponse {
@@ -44,9 +42,8 @@ message RemoveResponse {
 }
 
 message UpdateRequest {
-  uint32 section = 1;
-  string guid = 2;
-  map<string, google.protobuf.Any> data = 3;
+  string guid = 1;
+  map<string, google.protobuf.Any> data = 2;
 }
 
 message UpdateResponse {

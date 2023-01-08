@@ -1,10 +1,12 @@
-package stashserver
+package server
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	"net"
+	"sync"
+	"time"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -13,6 +15,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
 
+	"ourstash/internal/config"
 	"ourstash/internal/grpcproto"
 	"ourstash/internal/stashdb"
 )
@@ -24,22 +27,26 @@ var (
 
 const ()
 
-type StashServer struct {
+type GRPCServer struct {
 	grpcproto.UnimplementedStashServer
 
 	stash *stashdb.Stash
 	sugar *zap.SugaredLogger
 	gserv *grpc.Server
+	conf  *config.Config
+
+	wg sync.WaitGroup
 }
 
-func NewStashServer(stash *stashdb.Stash, logger *zap.Logger) *StashServer {
-	return &StashServer{
+func NewStashServer(stash *stashdb.Stash, conf *config.Config, logger *zap.Logger) *GRPCServer {
+	return &GRPCServer{
 		stash: stash,
+		conf:  conf,
 		sugar: logger.Sugar(),
 	}
 }
 
-func (ss *StashServer) Start() error {
+func (ss *GRPCServer) Start(ctx context.Context) error {
 	opts := []grpc.ServerOption{
 		grpc.UnaryInterceptor(ss.ensureValidToken),
 	}
@@ -53,24 +60,55 @@ func (ss *StashServer) Start() error {
 		return err
 	}
 
+	go ss.saveToDisk(ctx)
+	go ss.gracefulStop(ctx)
+
 	return ss.gserv.Serve(lis)
 }
 
-func (ss *StashServer) saveData() {
+func (ss *GRPCServer) saveToDisk(ctx context.Context) {
+	if ss.conf.StoreInterval == 0 {
+		return
+	}
 
+	ss.wg.Add(1)
+	defer ss.wg.Done()
+
+	ticker := time.NewTicker(ss.conf.StoreInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			err := ss.stash.SaveToDisk(ctx)
+			if err != nil {
+				ss.sugar.Errorw("stash.SaveToDisk", "error", err)
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
-func (ss *StashServer) GracefulStop() {
-	ss.saveData()
+func (ss *GRPCServer) gracefulStop(ctx context.Context) {
+	ss.wg.Add(1)
+	defer ss.wg.Done()
+
+	<-ctx.Done()
 	ss.gserv.GracefulStop()
 }
 
-func (ss *StashServer) ensureValidToken(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+func (ss *GRPCServer) Wait() {
+	ss.wg.Wait()
+}
+
+func (ss *GRPCServer) ensureValidToken(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		return nil, errMissingMetadata
 	}
-	ss.sugar.Infow("ensureValidToken", "token", md["authorization"])
+	ss.sugar.Debugw("ensureValidToken", "token", md["authorization"])
+
 	// The keys within metadata.MD are normalized to lowercase.
 	// See: https://godoc.org/google.golang.org/grpc/metadata#New
 	//if !valid(md["authorization"]) {
@@ -80,7 +118,7 @@ func (ss *StashServer) ensureValidToken(ctx context.Context, req interface{}, in
 	return handler(ctx, req)
 }
 
-func (ss *StashServer) Insert(ctx context.Context, in *grpcproto.InsertRequest) (*grpcproto.InsertResponse, error) {
+func (ss *GRPCServer) Insert(ctx context.Context, in *grpcproto.InsertRequest) (*grpcproto.InsertResponse, error) {
 	var resp grpcproto.InsertResponse
 
 	section, err := ss.getSection(in.Section)
@@ -100,17 +138,10 @@ func (ss *StashServer) Insert(ctx context.Context, in *grpcproto.InsertRequest) 
 	return &resp, nil
 }
 
-func (ss *StashServer) Get(ctx context.Context, in *grpcproto.GetRequest) (*grpcproto.GetResponse, error) {
+func (ss *GRPCServer) Get(ctx context.Context, in *grpcproto.GetRequest) (*grpcproto.GetResponse, error) {
 	var resp grpcproto.GetResponse
 
-	section, err := ss.getSection(in.Section)
-	if err != nil {
-		resp.Error = err.Error()
-		return &resp, nil
-	}
-
-	var data map[string]any
-	data, err = ss.stash.Get(section, stashdb.GUIDType(in.GetGuid()))
+	data, err := ss.stash.Get(stashdb.GUIDType(in.GetGuid()))
 	if err != nil {
 		resp.Error = err.Error()
 		return &resp, nil
@@ -144,22 +175,15 @@ func (ss *StashServer) Get(ctx context.Context, in *grpcproto.GetRequest) (*grpc
 	return &resp, nil
 }
 
-func (ss *StashServer) Update(ctx context.Context, in *grpcproto.UpdateRequest) (*grpcproto.UpdateResponse, error) {
+func (ss *GRPCServer) Update(ctx context.Context, in *grpcproto.UpdateRequest) (*grpcproto.UpdateResponse, error) {
 	var resp grpcproto.UpdateResponse
 
-	section, err := ss.getSection(in.Section)
-	if err != nil {
-		resp.Error = err.Error()
-		return &resp, nil
-	}
-
-	var data map[string]any
-	data, err = ss.toStashMap(in.Data)
+	data, err := ss.toStashMap(in.Data)
 	if err != nil {
 		resp.Error = err.Error()
 		return nil, err
 	}
-	err = ss.stash.Update(section, stashdb.GUIDType(in.Guid), data)
+	err = ss.stash.Update(stashdb.GUIDType(in.Guid), data)
 	if err != nil {
 		resp.Error = err.Error()
 	}
@@ -167,16 +191,10 @@ func (ss *StashServer) Update(ctx context.Context, in *grpcproto.UpdateRequest) 
 	return &resp, nil
 }
 
-func (ss *StashServer) Remove(ctx context.Context, in *grpcproto.RemoveRequest) (*grpcproto.RemoveResponse, error) {
+func (ss *GRPCServer) Remove(ctx context.Context, in *grpcproto.RemoveRequest) (*grpcproto.RemoveResponse, error) {
 	var resp grpcproto.RemoveResponse
 
-	section, err := ss.getSection(in.Section)
-	if err != nil {
-		resp.Error = err.Error()
-		return &resp, nil
-	}
-
-	err = ss.stash.Remove(section, stashdb.GUIDType(in.GetGuid()))
+	err := ss.stash.Remove(stashdb.GUIDType(in.GetGuid()))
 	if err != nil {
 		resp.Error = err.Error()
 	}
@@ -187,14 +205,14 @@ func (ss *StashServer) Remove(ctx context.Context, in *grpcproto.RemoveRequest) 
 	return &resp, nil
 }
 
-func (ss *StashServer) getSection(in uint32) (stashdb.SectionIdType, error) {
+func (ss *GRPCServer) getSection(in uint32) (stashdb.SectionIdType, error) {
 	if in == 0 || in > 254 {
 		return 0xff, fmt.Errorf("section must be in [1 ... 254]")
 	}
 	return stashdb.SectionIdType(in), nil
 }
 
-func (ss *StashServer) toStashMap(in map[string]*anypb.Any) (map[string]any, error) {
+func (ss *GRPCServer) toStashMap(in map[string]*anypb.Any) (map[string]any, error) {
 	out := make(map[string]any)
 	for field, val := range in {
 		switch val.GetTypeUrl() {
