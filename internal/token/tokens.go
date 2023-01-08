@@ -2,17 +2,14 @@ package token
 
 import (
 	"context"
-	"fmt"
-	"sync"
-	"time"
 )
 
 type Tokens struct {
 	// Cached accessToken to avoid an STS token exchange for every call to
 	// GetRequestMetadata.
-	mu            sync.Mutex
-	tokenMetadata map[string]string
-	tokenExpiry   time.Time
+	// mu sync.Mutex
+	// tokenMetadata map[string]string
+	// tokenExpiry time.Time
 }
 
 func (t *Tokens) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
@@ -41,7 +38,7 @@ func (t *Tokens) GetRequestMetadata(ctx context.Context, uri ...string) (map[str
 	//}
 	//t.tokenMetadata = map[string]string{"Authorization": fmt.Sprintf("%s %s", ti.tokenType, ti.token)}
 	//t.tokenExpiry = ti.expiryTime
-	return map[string]string{"Authorization": fmt.Sprintf("token cheto")}, nil
+	return map[string]string{"Authorization": "token cheto"}, nil
 }
 
 func (t *Tokens) RequireTransportSecurity() bool {

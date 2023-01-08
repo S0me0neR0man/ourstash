@@ -22,7 +22,7 @@ import (
 
 var (
 	errMissingMetadata = status.Errorf(codes.InvalidArgument, "missing metadata")
-	errInvalidToken    = status.Errorf(codes.Unauthenticated, "invalid token")
+	//errInvalidToken    = status.Errorf(codes.Unauthenticated, "invalid token")
 )
 
 const ()

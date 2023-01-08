@@ -218,6 +218,7 @@ func TestStash_SaveToDisk_LoadFromDisk(t *testing.T) {
 	conf.StoreInterval = 0
 	sTo, err := NewStash(conf, getTestLogger())
 	require.NotNil(t, sTo)
+	require.NoError(t, err)
 
 	to := generateTestData()
 
@@ -234,6 +235,7 @@ func TestStash_SaveToDisk_LoadFromDisk(t *testing.T) {
 	var sFrom *Stash
 	sFrom, err = NewStash(conf, getTestLogger())
 	require.NotNil(t, sFrom)
+	require.NoError(t, err)
 	require.EqualValues(t, sTo.size, sFrom.size)
 
 	controlTo := sTo.copyData(ctx)

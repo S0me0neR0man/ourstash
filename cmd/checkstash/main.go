@@ -7,7 +7,6 @@ import (
 	"syscall"
 
 	"go.uber.org/zap"
-	"golang.org/x/oauth2"
 )
 
 func main() {
@@ -35,8 +34,8 @@ func main() {
 // fetchToken simulates a token lookup and omits the details of proper token
 // acquisition. For examples of how to acquire an OAuth2 token, see:
 // https://godoc.org/golang.org/x/oauth2
-func fetchToken() *oauth2.Token {
-	return &oauth2.Token{
-		AccessToken: "some-secret-token",
-	}
-}
+//func fetchToken() *oauth2.Token {
+//	return &oauth2.Token{
+//		AccessToken: "some-secret-token",
+//	}
+//}
