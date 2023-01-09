@@ -1,4 +1,4 @@
-module ourstash
+module  github.com/S0me0neR0man/ourstash
 
 go 1.18
 

@@ -9,8 +9,8 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"ourstash/internal/grpcproto"
-	"ourstash/internal/token"
+	"github.com/S0me0neR0man/ourstash/internal/grpcproto"
+	"github.com/S0me0neR0man/ourstash/internal/token"
 )
 
 type GRPCData map[string]*anypb.Any

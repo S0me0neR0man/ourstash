@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"ourstash/internal/config"
+	"github.com/S0me0neR0man/ourstash/internal/config"
 )
 
 const (

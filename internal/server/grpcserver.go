@@ -15,9 +15,9 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"ourstash/internal/config"
-	"ourstash/internal/grpcproto"
-	"ourstash/internal/stashdb"
+	"github.com/S0me0neR0man/ourstash/internal/config"
+	"github.com/S0me0neR0man/ourstash/internal/grpcproto"
+	"github.com/S0me0neR0man/ourstash/internal/stashdb"
 )
 
 var (

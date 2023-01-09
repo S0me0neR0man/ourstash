@@ -11,8 +11,8 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"ourstash/internal/client"
-	"ourstash/internal/grpcproto"
+	"github.com/S0me0neR0man/ourstash/internal/client"
+	"github.com/S0me0neR0man/ourstash/internal/grpcproto"
 )
 
 const (

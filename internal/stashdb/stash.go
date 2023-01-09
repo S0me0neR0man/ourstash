@@ -14,8 +14,8 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
 
-	"ourstash/data"
-	"ourstash/internal/config"
+	"github.com/S0me0neR0man/ourstash/data"
+	"github.com/S0me0neR0man/ourstash/internal/config"
 )
 
 type OperationType int
