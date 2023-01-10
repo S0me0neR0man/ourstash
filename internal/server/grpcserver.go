@@ -235,3 +235,19 @@ func (ss *GRPCServer) toStashMap(in map[string]*anypb.Any) (map[string]any, erro
 
 	return out, nil
 }
+
+func (ss *GRPCServer) Replace(ctx context.Context, in *grpcproto.UpdateRequest) (*grpcproto.UpdateResponse, error) {
+	var resp grpcproto.UpdateResponse
+
+	data, err := ss.toStashMap(in.Data)
+	if err != nil {
+		resp.Error = err.Error()
+		return nil, err
+	}
+	err = ss.stash.Replace(stashdb.GUIDType(in.Guid), data)
+	if err != nil {
+		resp.Error = err.Error()
+	}
+
+	return &resp, nil
+}

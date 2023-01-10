@@ -301,6 +301,39 @@ func (s *Stash) putData(section SectionIdType, recId RecordIdType, data map[stri
 	}
 }
 
+func (s *Stash) replaceData(section SectionIdType, recId RecordIdType, data map[string]any) error {
+	header := s.get(NewKey(section, recId, recordHeaderFieldId))
+	if header == nil {
+		return ErrRecordNotFound
+	}
+
+	it := s.iteratorAt(header)
+	flag := it.next()
+	for flag && it.node != nil && it.node.key.Section() == section && it.node.key.Record() == recId {
+
+		key := it.node.key
+
+		fn, err := s.fieldNameSFG(section, key.Field())
+		if err != nil {
+			s.sugar.Errorw("replace", "error", err)
+			flag = it.next()
+			continue
+		}
+
+		val, ok := data[fn]
+		if !ok {
+			flag = it.next()
+			s.remove(key)
+			continue
+		}
+		s.m.Store(key, val)
+
+		flag = it.next()
+	}
+
+	return nil
+}
+
 // copyData in new map
 // ATTENTION: lock data
 func (s *Stash) copyData(ctx context.Context) map[Key]any {
@@ -398,7 +431,8 @@ func (s *Stash) Remove(guid GUIDType) error {
 	return nil
 }
 
-// Update data
+// Update data:
+// a new record is created with the same guid, the old data is marked as deleted
 func (s *Stash) Update(guid GUIDType, data map[string]any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -521,4 +555,21 @@ func (s *Stash) loadFromDisk() error {
 	}
 
 	return nil
+}
+
+// Replace data
+// replace all data in guid
+func (s *Stash) Replace(guid GUIDType, data map[string]any) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	headerKey, err := s.recordKeySFG(guid)
+	if err != nil {
+		return err
+	}
+
+	err = s.replaceData(headerKey.Section(), headerKey.Record(), data)
+
+	s.sugar.Debugw("replace", "Guid", guid, "headerKey", headerKey, "error", err)
+	return err
 }

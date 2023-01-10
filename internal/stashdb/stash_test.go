@@ -242,3 +242,31 @@ func TestStash_SaveToDisk_LoadFromDisk(t *testing.T) {
 	controlFrom := sFrom.copyData(ctx)
 	require.Equal(t, controlTo, controlFrom)
 }
+
+func TestStash_Replace(t *testing.T) {
+	const fn1 = "text"
+	const fn2 = "int_val537"
+	to := map[string]any{
+		"tag": "#tag537",
+		fn1:   "sample text 537",
+		fn2:   537,
+	}
+
+	s, err := NewStash(getConfig(), getTestLogger())
+	require.NoError(t, err)
+	require.NotNil(t, s)
+
+	s.Insert(1, to)
+	guid := s.Insert(1, to)
+	s.Insert(1, to)
+	s.Insert(1, to)
+	delete(to, fn1)
+	delete(to, fn2)
+	err = s.Replace(guid, to)
+	require.NoError(t, err)
+
+	var from map[string]any
+	from, err = s.Get(guid)
+	require.NoError(t, err)
+	require.EqualValues(t, to, from)
+}

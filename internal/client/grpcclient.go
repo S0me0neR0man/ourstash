@@ -89,6 +89,22 @@ func (c *GRPCClient) Update(ctx context.Context, guid string, data GRPCData) err
 	return nil
 }
 
+func (c *GRPCClient) Replace(ctx context.Context, guid string, data GRPCData) error {
+	resp, err := c.client.Replace(ctx, &grpcproto.UpdateRequest{
+		Guid: guid,
+		Data: data,
+	})
+
+	if err != nil {
+		return err
+	}
+	if resp.Error != "" {
+		return fmt.Errorf("replace resp.Error: " + resp.Error)
+	}
+
+	return nil
+}
+
 func (c *GRPCClient) Remove(ctx context.Context, guid string) error {
 	resp, err := c.client.Remove(ctx, &grpcproto.RemoveRequest{
 		Guid: guid,

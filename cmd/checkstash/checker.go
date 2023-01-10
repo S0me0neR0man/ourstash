@@ -20,11 +20,12 @@ const (
 )
 
 type simpleRecord struct {
-	section uint32
-	guid    string
-	data    client.GRPCData
-	deleted bool
-	updated bool
+	section  uint32
+	guid     string
+	data     client.GRPCData
+	deleted  bool
+	updated  bool
+	replaced bool
 }
 
 func (s simpleRecord) String() string {
@@ -70,12 +71,15 @@ func newSimpleRecord() (simpleRecord, error) {
 	return rec, nil
 }
 
+// TODO: разделить обхода (граф) и логику взаимодействия с объектом тестирования
+
 type Checker struct {
 	toDisplay chan string
 
 	toGet      chan simpleRecord
 	toUpdate   chan simpleRecord
 	toRemove   chan simpleRecord
+	toReplace  chan simpleRecord
 	toGetAfter chan simpleRecord
 
 	wg sync.WaitGroup
@@ -96,13 +100,14 @@ func NewChecker(logger *zap.Logger) (*Checker, error) {
 		toDisplay:  make(chan string),
 		toGet:      make(chan simpleRecord),
 		toUpdate:   make(chan simpleRecord),
+		toReplace:  make(chan simpleRecord),
 		toRemove:   make(chan simpleRecord),
 		toGetAfter: make(chan simpleRecord),
 	}, nil
 }
 
 func (c *Checker) Go(ctx context.Context) {
-	c.wg.Add(14)
+	c.wg.Add(16)
 
 	go c.display(ctx)
 	go c.display(ctx)
@@ -119,6 +124,8 @@ func (c *Checker) Go(ctx context.Context) {
 	go c.update(ctx)
 	go c.remove(ctx)
 	go c.remove(ctx)
+	go c.replace(ctx)
+	go c.replace(ctx)
 }
 
 func (c *Checker) Wait() error {
@@ -146,61 +153,65 @@ func (c *Checker) display(ctx context.Context) {
 }
 
 func (c *Checker) insert(ctx context.Context) {
+	const msg = "insert"
 	defer c.wg.Done()
 
 	count := 0
-	c.sugar.Infow("insert start")
+	c.sugar.Infow(msg + " start")
 
 	for {
 		select {
 		case <-ctx.Done():
-			c.sugar.Infow("insert done")
+			c.sugar.Infow(msg + " done")
 			return
 		default:
-			c.sugar.Debugw("insert default")
+			c.sugar.Debugw(msg + " default")
 			rec, err := newSimpleRecord()
 			if err != nil {
-				c.sugar.Fatalw("insert", "error", err)
+				c.sugar.Fatalw(msg, "error", err)
 			}
 			rec.guid, err = c.client.Insert(ctx, rec.section, rec.data)
 			if err != nil {
-				c.sugar.Fatalw("insert", "error", err)
+				c.sugar.Fatalw(msg, "error", err)
 			}
-			c.sugar.Debugw("insert ok", "rec", rec)
+			c.sugar.Debugw(msg+" ok", "rec", rec)
+
+			c.toGet <- rec
+			c.sugar.Debugw(msg+" toGet<-", "rec", rec)
+
 			count++
 			if count == displayCounter {
 				count = 0
 				c.toDisplay <- "I"
 			}
-			c.toGet <- rec
-			c.sugar.Debugw("insert toGet<-", "rec", rec)
 		}
 	}
 }
 
 func (c *Checker) get(ctx context.Context) {
+	const msg = "get"
 	defer c.wg.Done()
 
-	c.sugar.Infow("get start")
+	c.sugar.Infow(msg + " start")
 	count := 0
 
 	for {
 		select {
 		case <-ctx.Done():
-			c.sugar.Infow("get done")
+			c.sugar.Infow(msg + " done")
 			return
 
 		case rec := <-c.toGet:
-			c.sugar.Debugw("get <-toGet", "rec", rec)
+			c.sugar.Debugw(msg+" <-toGet", "rec", rec)
 			getData, err := c.client.Get(ctx, rec.guid)
 			if err != nil {
-				c.sugar.Errorw("get", "error", err)
+				c.sugar.Errorw(msg, "error", err)
 				continue
 			}
-			c.sugar.Debugw("get from stash ok", "guid", rec.guid, "data", getData)
+			c.sugar.Debugw(msg+" from stash ok", "guid", rec.guid, "data", getData)
 
 			c.compare(rec.guid, rec.data, getData)
-			c.sugar.Debugw("get compare done", "rec", rec)
+			c.sugar.Debugw(msg+" compare done", "rec", rec)
 
 			count++
 			if count == displayCounter {
@@ -208,42 +219,48 @@ func (c *Checker) get(ctx context.Context) {
 				c.toDisplay <- "G"
 			}
 
-			if rand.Intn(2) == 0 {
-				c.sugar.Debugw("get before toRemote<-", "rec", rec)
+			switch rand.Intn(3) {
+			case 0:
+				c.sugar.Debugw(msg+" before toRemote<-", "rec", rec)
 				c.toRemove <- rec
-				c.sugar.Debugw("get toRemove<- ok", "rec", rec)
-			} else {
-				c.sugar.Debugw("get before toUpdate<-", "rec", rec)
+				c.sugar.Debugw(msg+" toRemove<- ok", "rec", rec)
+			case 1:
+				c.sugar.Debugw(msg+" before toUpdate<-", "rec", rec)
 				c.toUpdate <- rec
-				c.sugar.Debugw("get toUpdate<- ok", "rec", rec)
+				c.sugar.Debugw(msg+" toUpdate<- ok", "rec", rec)
+			case 2:
+				c.sugar.Debugw(msg+" before toReplace<-", "rec", rec)
+				c.toReplace <- rec
+				c.sugar.Debugw(msg+" toUpdate<- ok", "rec", rec)
 			}
 		}
 	}
 }
 
 func (c *Checker) update(ctx context.Context) {
+	const msg = "update"
 	defer c.wg.Done()
 
-	c.sugar.Infow("update start")
+	c.sugar.Infow(msg + " start")
 	count := 0
 
 	for {
 		select {
 		case <-ctx.Done():
-			c.sugar.Infow("update done")
+			c.sugar.Infow(msg + " done")
 			return
 		case rec := <-c.toUpdate:
-			c.sugar.Debugw("update <-toUpdate ok", "rec", rec)
+			c.sugar.Debugw(msg+" <-toUpdate ok", "rec", rec)
 			err := c.client.Update(ctx, rec.guid, rec.data)
-			if err != nil && !rec.deleted {
-				c.sugar.Fatalw("update", "error", err)
+			if err != nil {
+				c.sugar.Errorw(msg, "error", err)
 			}
 
 			rec.updated = true
-			c.sugar.Debugw("update ok", "rec", rec)
+			c.sugar.Debugw(msg+" ok", "rec", rec)
 
 			c.toGetAfter <- rec
-			c.sugar.Debugw("update toGetAfter<- ok", "rec", rec)
+			c.sugar.Debugw(msg+" toGetAfter<- ok", "rec", rec)
 
 			count++
 			if count == displayCounter {
@@ -255,28 +272,29 @@ func (c *Checker) update(ctx context.Context) {
 }
 
 func (c *Checker) remove(ctx context.Context) {
+	const msg = "remove"
 	defer c.wg.Done()
 
-	c.sugar.Infow("remove start")
+	c.sugar.Infow(msg + " start")
 	count := 0
 
 	for {
 		select {
 		case <-ctx.Done():
-			c.sugar.Infow("remove done")
+			c.sugar.Infow(msg + " done")
 			return
 		case rec := <-c.toRemove:
-			c.sugar.Debugw("remove <-toRemove ok", "rec", rec)
+			c.sugar.Debugw(msg+" <-toRemove ok", "rec", rec)
 			err := c.client.Remove(ctx, rec.guid)
-			if err != nil && !rec.deleted {
-				c.sugar.Fatalw("remove", "error", err)
+			if err != nil {
+				c.sugar.Errorw(msg, "error", err)
 			}
 
 			rec.deleted = true
-			c.sugar.Debugw("remove ok", "rec", rec)
+			c.sugar.Debugw(msg+" ok", "rec", rec)
 
 			c.toGetAfter <- rec
-			c.sugar.Debugw("remove toGetAfter<- ok", "rec", rec)
+			c.sugar.Debugw(msg+" toGetAfter<- ok", "rec", rec)
 
 			count++
 			if count == displayCounter {
@@ -288,30 +306,31 @@ func (c *Checker) remove(ctx context.Context) {
 }
 
 func (c *Checker) getAfter(ctx context.Context) {
+	const msg = "getAfter"
 	defer c.wg.Done()
 
-	c.sugar.Infow("get start")
+	c.sugar.Infow(msg + " start")
 	count := 0
 
 	for {
 		select {
 		case <-ctx.Done():
-			c.sugar.Infow("get done")
+			c.sugar.Infow(msg + " done")
 			return
 
 		case rec := <-c.toGetAfter:
-			c.sugar.Debugw("getAfter <-toGetAfter", "rec", rec)
+			c.sugar.Debugw(msg+" <-toGetAfter", "rec", rec)
 			getData, err := c.client.Get(ctx, rec.guid)
 			if err != nil && !rec.deleted {
-				c.sugar.Errorw("getAfter", "error", err)
+				c.sugar.Errorw(msg, "error", err)
 				continue
 			}
-			c.sugar.Debugw("getAfter from stash ok", "guid", rec.guid, "data", getData)
+			c.sugar.Debugw(msg+" from stash ok", "guid", rec.guid, "data", getData)
 
 			if !rec.deleted {
 				c.compare(rec.guid, rec.data, getData)
 			}
-			c.sugar.Debugw("getAfter compare done", "rec", rec)
+			c.sugar.Debugw(msg+" compare done", "rec", rec)
 
 			count++
 			if count == displayCounter {
@@ -330,5 +349,39 @@ func (c *Checker) compare(guid string, before client.GRPCData, after client.GRPC
 	}
 	if len(before) != len(after) {
 		c.sugar.Errorw("wrong length", "guid", guid, "before", len(before), "after", len(after))
+	}
+}
+
+func (c *Checker) replace(ctx context.Context) {
+	const msg = "replace"
+	defer c.wg.Done()
+
+	c.sugar.Infow(msg + " start")
+	count := 0
+
+	for {
+		select {
+		case <-ctx.Done():
+			c.sugar.Infow(msg + " done")
+			return
+		case rec := <-c.toReplace:
+			c.sugar.Debugw(msg+" <-toReplace ok", "rec", rec)
+			err := c.client.Replace(ctx, rec.guid, rec.data)
+			if err != nil {
+				c.sugar.Errorw(msg, "error", err)
+			}
+
+			rec.replaced = true
+			c.sugar.Debugw(msg+" ok", "rec", rec)
+
+			c.toGetAfter <- rec
+			c.sugar.Debugw(msg+" toGetAfter<- ok", "rec", rec)
+
+			count++
+			if count == displayCounter {
+				count = 0
+				c.toDisplay <- "E"
+			}
+		}
 	}
 }
