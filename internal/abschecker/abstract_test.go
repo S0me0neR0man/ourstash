@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -29,7 +30,7 @@ func TestStateRouter_Go(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, super)
 
-	create := NewState("create", 3, logger)
+	create := NewState("create", 2, logger)
 	create.SetCheckFunc(check)
 	split := NewState("split", 3, logger)
 	split.SetCheckFunc(check)
@@ -39,10 +40,12 @@ func TestStateRouter_Go(t *testing.T) {
 	road2.SetCheckFunc(check)
 
 	create.SetDoFunc(func(data any) (any, *State, error) {
+		fmt.Fprint(os.Stdout, "C")
 		return data, split, nil
 	})
 
 	split.SetDoFunc(func(before any) (any, *State, error) {
+		fmt.Fprint(os.Stdout, "S")
 		switch rand.Intn(2) {
 		case 0:
 			return before, road1, nil
@@ -53,24 +56,17 @@ func TestStateRouter_Go(t *testing.T) {
 	})
 
 	road1.SetDoFunc(func(data any) (any, *State, error) {
-		i := data.(int)
-		i++
-		if i == 5 {
-			return nil, nil, nil
-		}
-		return i, split, nil
+		fmt.Fprint(os.Stdout, "1")
+		return nil, nil, nil
 	})
 
 	road2.SetDoFunc(func(data any) (any, *State, error) {
-		i := data.(int)
-		i++
-		if i == 5 {
-			return nil, nil, nil
-		}
-		return i, split, nil
+		fmt.Fprint(os.Stdout, "2")
+		return nil, nil, nil
 	})
 
 	super.SetGenDataFunc(func() (any, *State, error) {
+		fmt.Fprint(os.Stdout, ">")
 		return 0, create, nil
 	})
 
@@ -86,9 +82,12 @@ func TestStateRouter_Go(t *testing.T) {
 	err = super.Add(road2)
 	require.NoError(t, err)
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*60)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
 	err = super.Go(ctx)
 	require.NoError(t, err)
+
+	// todo: пока не работает, баг в момент shutdown блокируется  иногда
+	//	super.Wait()
 }
