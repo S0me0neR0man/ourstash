@@ -1,7 +1,6 @@
 package stashdb
 
 import (
-	"fmt"
 	"log"
 	"sync"
 	"testing"
@@ -18,7 +17,7 @@ var (
 func getTestLogger() *zap.Logger {
 	once.Do(func() {
 		var err error
-		logger, err = zap.NewDevelopment() // or NewProduction, or NewDevelopment
+		logger, err = zap.NewProduction() // or NewProduction, or NewDevelopment,
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -28,6 +27,8 @@ func getTestLogger() *zap.Logger {
 }
 
 func Test_redBlackTree_Put(t1 *testing.T) {
+	sugar := getTestLogger().Sugar()
+
 	tree := newRedBlackTree()
 	require.NotNil(t1, tree)
 	require.EqualValues(t1, tree.sizeof(), 0, "not empty")
@@ -40,7 +41,7 @@ func Test_redBlackTree_Put(t1 *testing.T) {
 	tree.put(NewKey(0, 5, 0))
 	tree.put(NewKey(0, 6, 0))
 
-	fmt.Println(tree)
+	sugar.Debugln(tree)
 
 	// redBlackTree
 	// │           ┌── R 00 0000000000000006 0000
@@ -62,6 +63,8 @@ func Test_redBlackTree_Put(t1 *testing.T) {
 }
 
 func TestRedBlackTree_Remove(t1 *testing.T) {
+	sugar := getTestLogger().Sugar()
+
 	tree := newRedBlackTree()
 	require.NotNil(t1, tree)
 	require.EqualValues(t1, tree.sizeof(), 0, "not empty")
@@ -79,7 +82,7 @@ func TestRedBlackTree_Remove(t1 *testing.T) {
 	tree.put(NewKey(0, 5, 0))
 	tree.put(NewKey(0, 6, 0))
 
-	fmt.Println(tree)
+	sugar.Debugln(tree)
 
 	// redBlackTree
 	// │       ┌── B 00 000000000000000a 0000
@@ -104,7 +107,7 @@ func TestRedBlackTree_Remove(t1 *testing.T) {
 	tree.remove(NewKey(0, 9, 0))
 	tree.remove(NewKey(0, 8, 0))
 
-	fmt.Println(tree)
+	sugar.Debugln(tree)
 
 	// redBlackTree
 	// │   ┌── B 00 0000000000000006 0000
