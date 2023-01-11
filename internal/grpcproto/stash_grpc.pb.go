@@ -26,6 +26,7 @@ type StashClient interface {
 	Get(ctx context.Context, in *GetRequest, opts ...grpc.CallOption) (*GetResponse, error)
 	Remove(ctx context.Context, in *RemoveRequest, opts ...grpc.CallOption) (*RemoveResponse, error)
 	Update(ctx context.Context, in *UpdateRequest, opts ...grpc.CallOption) (*UpdateResponse, error)
+	Replace(ctx context.Context, in *UpdateRequest, opts ...grpc.CallOption) (*UpdateResponse, error)
 }
 
 type stashClient struct {
@@ -72,6 +73,15 @@ func (c *stashClient) Update(ctx context.Context, in *UpdateRequest, opts ...grp
 	return out, nil
 }
 
+func (c *stashClient) Replace(ctx context.Context, in *UpdateRequest, opts ...grpc.CallOption) (*UpdateResponse, error) {
+	out := new(UpdateResponse)
+	err := c.cc.Invoke(ctx, "/grpcs.Stash/Replace", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // StashServer is the server API for Stash service.
 // All implementations must embed UnimplementedStashServer
 // for forward compatibility
@@ -80,6 +90,7 @@ type StashServer interface {
 	Get(context.Context, *GetRequest) (*GetResponse, error)
 	Remove(context.Context, *RemoveRequest) (*RemoveResponse, error)
 	Update(context.Context, *UpdateRequest) (*UpdateResponse, error)
+	Replace(context.Context, *UpdateRequest) (*UpdateResponse, error)
 	mustEmbedUnimplementedStashServer()
 }
 
@@ -98,6 +109,9 @@ func (UnimplementedStashServer) Remove(context.Context, *RemoveRequest) (*Remove
 }
 func (UnimplementedStashServer) Update(context.Context, *UpdateRequest) (*UpdateResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Update not implemented")
+}
+func (UnimplementedStashServer) Replace(context.Context, *UpdateRequest) (*UpdateResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Replace not implemented")
 }
 func (UnimplementedStashServer) mustEmbedUnimplementedStashServer() {}
 
@@ -184,6 +198,24 @@ func _Stash_Update_Handler(srv interface{}, ctx context.Context, dec func(interf
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Stash_Replace_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StashServer).Replace(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/grpcs.Stash/Replace",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StashServer).Replace(ctx, req.(*UpdateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Stash_ServiceDesc is the grpc.ServiceDesc for Stash service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -206,6 +238,10 @@ var Stash_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Update",
 			Handler:    _Stash_Update_Handler,
+		},
+		{
+			MethodName: "Replace",
+			Handler:    _Stash_Replace_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
