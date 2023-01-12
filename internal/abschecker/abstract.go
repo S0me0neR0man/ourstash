@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"sync/atomic"
 
 	"go.uber.org/zap"
 )
@@ -15,9 +14,19 @@ var (
 	ErrShutdownInProgress = errors.New("not initialized")
 )
 
-type DoFunc func(any) (any, *State, error)
-type CheckFunc func(any, any) error
-type GenDataFunc func() (any, *State, error)
+type DataToBeVerified struct {
+	CurrentState string
+	NextState    string
+	Data         any
+}
+
+func (d DataToBeVerified) String() string {
+	return fmt.Sprintf("(%s) -> (%s) %v", d.CurrentState, d.NextState, d.Data)
+}
+
+type DoFunc func(DataToBeVerified) (DataToBeVerified, error)
+type CheckFunc func(DataToBeVerified, DataToBeVerified) error
+type DataSourceFunc func() (DataToBeVerified, error)
 
 type State struct {
 	Id      string
@@ -25,8 +34,7 @@ type State struct {
 
 	doFunc    DoFunc
 	checkFunc CheckFunc
-	inChan    chan any
-	stopFlag  atomic.Bool
+	inChan    chan DataToBeVerified
 
 	sugar *zap.SugaredLogger
 }
@@ -36,7 +44,7 @@ func NewState(id string, goCount uint, logger *zap.Logger) *State {
 		Id:      id,
 		GoCount: goCount,
 		sugar:   logger.Sugar(),
-		inChan:  make(chan any),
+		inChan:  make(chan DataToBeVerified),
 	}
 }
 
@@ -52,50 +60,43 @@ func (s *State) SetCheckFunc(f CheckFunc) {
 	s.checkFunc = f
 }
 
-func (s *State) goWork(ctx context.Context, done chan int) {
+func (s *State) job(ctx context.Context, routerChan chan DataToBeVerified, doneChan chan any) {
 	defer func() {
-		done <- 0
+		doneChan <- 0
 	}()
 
-	const msg = "goWork"
+	const msg = "job"
 	s.sugar.Infoln(msg, s.Id, "started")
 	for {
 		select {
 		case <-ctx.Done():
-			s.stopFlag.Store(true)
-			s.sugar.Infoln(msg, s.Id, "done")
+			s.sugar.Infoln(msg, s.Id, " ctx.Done() received")
 			return
 		case before := <-s.inChan:
-			s.sugar.Debugw(msg, "Id", s.Id, "before", before)
-			after, next, err := s.doFunc(before)
+			s.sugar.Debugf("%s %s <- %v", msg, s.Id, before)
+			after, err := s.doFunc(before)
 			if err != nil {
-				s.sugar.Errorw(msg, "Id", s.Id, "error", err)
+				s.sugar.Debugf("%s %s doFunc: %s", msg, s.Id, err.Error())
 				return
 			}
-			s.sugar.Debugw(msg, "Id", s.Id, "after", after)
+			s.sugar.Debugf("%s %s after %v", msg, s.Id, after)
 			err = nil
-			if s.checkFunc == nil {
+			if s.checkFunc != nil {
 				err = s.checkFunc(before, after)
 			}
 			if err != nil {
-				s.sugar.Errorw("checkFunc", "Id", s.Id, "error", err)
+				s.sugar.Debugf("%s %s checkFunc: %s", msg, s.Id, err.Error())
 				continue
 			}
-			if next != nil {
-				s.sugar.Debugf("%s <- %s", next.Id, s.Id)
-				err = next.Push(after)
-				if errors.Is(err, ErrShutdownInProgress) {
-					s.sugar.Debugf("shutdown in progress (%s <- %s). can't push.", next.Id, s.Id)
-				}
+			if after.NextState != "" {
+				s.sugar.Debugf("%s %s -> %s", msg, s.Id, after.NextState)
+				routerChan <- after
 			}
 		}
 	}
 }
 
-func (s *State) Push(data any) error {
-	if s.stopFlag.Load() {
-		return ErrShutdownInProgress
-	}
+func (s *State) Push(data DataToBeVerified) error {
 	s.inChan <- data
 	s.sugar.Debugf("Pushed %s <- %v", s.Id, data)
 	return nil
@@ -104,13 +105,18 @@ func (s *State) Push(data any) error {
 type StateSupervisor struct {
 	mu sync.RWMutex
 
-	states      map[string]*State
-	genDataFunc GenDataFunc
+	states map[string]*State
 
-	done chan int
+	sourceFunc DataSourceFunc
+
+	done chan any
 	wg   sync.WaitGroup
 
-	superDone chan int
+	routerChan chan DataToBeVerified
+	routerDone chan any
+	routerWG   sync.WaitGroup
+
+	superDone chan any
 	superWG   sync.WaitGroup
 
 	sugar *zap.SugaredLogger
@@ -119,8 +125,8 @@ type StateSupervisor struct {
 func NewStateSupervisor(logger *zap.Logger) (*StateSupervisor, error) {
 	return &StateSupervisor{
 		sugar:     logger.Sugar(),
-		done:      make(chan int),
-		superDone: make(chan int),
+		done:      make(chan any),
+		superDone: make(chan any),
 		states:    make(map[string]*State),
 	}, nil
 }
@@ -129,13 +135,21 @@ func (sv *StateSupervisor) Add(s *State) error {
 	sv.mu.Lock()
 	defer sv.mu.Unlock()
 
+	if s == nil {
+		return errors.New("input param is nil")
+	}
+
 	sv.states[s.Id] = s
 	sv.sugar.Infof("added %v", s)
 	return nil
 }
 
+func (sv *StateSupervisor) SetGenDataFunc(f DataSourceFunc) {
+	sv.sourceFunc = f
+}
+
 func (sv *StateSupervisor) Go(ctx context.Context) error {
-	if sv.genDataFunc == nil || len(sv.states) == 0 {
+	if sv.sourceFunc == nil || len(sv.states) == 0 {
 		return ErrNotInitialized
 	}
 	sv.sugar.Infoln("starting ...")
@@ -146,16 +160,15 @@ func (sv *StateSupervisor) Go(ctx context.Context) error {
 	return nil
 }
 
-func (sv *StateSupervisor) SetGenDataFunc(f GenDataFunc) {
-	sv.genDataFunc = f
-}
-
 func (sv *StateSupervisor) startGoroutines(ctx context.Context) {
 	sv.superWG.Add(1)
-	go sv.supervisor(ctx)
+	go sv.supervisorJob()
+
+	sv.routerWG.Add(1)
+	go sv.routeJob()
 
 	sv.wg.Add(1)
-	go sv.generateData(ctx)
+	go sv.sourceJob(ctx)
 
 	for id, state := range sv.states {
 		if state.doFunc == nil {
@@ -164,18 +177,16 @@ func (sv *StateSupervisor) startGoroutines(ctx context.Context) {
 		}
 		for i := uint(0); i < state.GoCount; i++ {
 			sv.wg.Add(1)
-			go state.goWork(ctx, sv.done)
+			go state.job(ctx, sv.routerChan, sv.done)
 		}
 		sv.sugar.Infof("%v started", state)
 	}
 }
 
-func (sv *StateSupervisor) supervisor(ctx context.Context) {
-	defer func() {
-		sv.superWG.Done()
-	}()
+func (sv *StateSupervisor) supervisorJob() {
+	defer sv.superWG.Done()
 
-	const msg = "supervisor"
+	const msg = "supervisorJob"
 	sv.sugar.Infoln(msg, "started")
 	for {
 		select {
@@ -188,20 +199,39 @@ func (sv *StateSupervisor) supervisor(ctx context.Context) {
 	}
 }
 
-func (sv *StateSupervisor) Wait() {
-	sv.wg.Wait()
-	sv.superDone <- 0
-	sv.superWG.Wait()
-	sv.mu.RUnlock()
-	sv.sugar.Infoln("ALL graceful shutdown")
+func (sv *StateSupervisor) routeJob() {
+	defer sv.routerWG.Done()
+
+	const msg = "routerJob"
+	sv.sugar.Infoln(msg, "started")
+	for {
+		select {
+		case <-sv.routerDone:
+			sv.sugar.Infoln(msg + " done")
+			return
+		case data := <-sv.routerChan:
+			if data.NextState == "" {
+				continue
+			}
+			state, ok := sv.states[data.NextState]
+			if !ok {
+				sv.sugar.Errorf("%s error: %s not found", msg, data.NextState)
+				continue
+			}
+			err := state.Push(data)
+			if err != nil {
+				sv.sugar.Errorf("%s Push error: %s", msg, err.Error())
+			}
+		}
+	}
 }
 
-func (sv *StateSupervisor) generateData(ctx context.Context) {
+func (sv *StateSupervisor) sourceJob(ctx context.Context) {
 	defer func() {
 		sv.done <- 0
 	}()
 
-	const msg = "generateData"
+	const msg = "sourceJob"
 	sv.sugar.Infoln(msg, "started")
 	for {
 		select {
@@ -209,19 +239,36 @@ func (sv *StateSupervisor) generateData(ctx context.Context) {
 			sv.sugar.Infoln(msg + " done")
 			return
 		default:
-			data, state, err := sv.genDataFunc()
+			data, err := sv.sourceFunc()
 			if err != nil {
-				sv.sugar.Fatalw(msg, "error", err)
-				return
+				sv.sugar.Fatalln(msg, err)
 			}
-			if state == nil {
-				sv.sugar.Fatalw(msg, "error", "state is nil")
+			if data.NextState == "" {
+				continue
+			}
+			state, ok := sv.states[data.NextState]
+			if !ok {
+				sv.sugar.Errorf("%s error: %s not found", msg, data.NextState)
+				continue
 			}
 			err = state.Push(data)
-			if errors.Is(err, ErrShutdownInProgress) {
-				return
+			if err != nil {
+				sv.sugar.Errorf("%s Push error: %s", msg, err.Error())
 			}
 		}
 	}
 
+}
+
+func (sv *StateSupervisor) Wait() {
+	sv.wg.Wait()
+
+	sv.superDone <- 0
+	sv.superWG.Wait()
+
+	sv.routerDone <- 0
+	sv.routerWG.Wait()
+
+	sv.mu.RUnlock()
+	sv.sugar.Infoln("ALL graceful shutdown")
 }

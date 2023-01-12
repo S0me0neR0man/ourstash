@@ -2,7 +2,6 @@ package abschecker
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -14,9 +13,16 @@ import (
 	"go.uber.org/zap"
 )
 
-func check(before any, after any) error {
-	if !reflect.DeepEqual(before, after) {
-		return fmt.Errorf("check error %v not equal %v", before, after)
+const (
+	createState = "create"
+	splitState  = "split"
+	road1State  = "road1"
+	road2State  = "road2"
+)
+
+func check(before DataToBeVerified, after DataToBeVerified) error {
+	if !reflect.DeepEqual(before.Data, after.Data) {
+		return fmt.Errorf("check error: %v not equal %v", before, after)
 	}
 	return nil
 }
@@ -30,44 +36,49 @@ func TestStateRouter_Go(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, super)
 
-	create := NewState("create", 2, logger)
+	create := NewState(createState, 1, logger)
 	create.SetCheckFunc(check)
-	split := NewState("split", 3, logger)
+	split := NewState(splitState, 1, logger)
 	split.SetCheckFunc(check)
-	road1 := NewState("road1", 2, logger)
+	road1 := NewState(road1State, 1, logger)
 	road1.SetCheckFunc(check)
-	road2 := NewState("road2", 2, logger)
+	road2 := NewState(road2State, 1, logger)
 	road2.SetCheckFunc(check)
 
-	create.SetDoFunc(func(data any) (any, *State, error) {
+	create.SetDoFunc(func(data DataToBeVerified) (DataToBeVerified, error) {
 		fmt.Fprint(os.Stdout, "C")
-		return data, split, nil
+		data.NextState = splitState
+		return data, nil
 	})
 
-	split.SetDoFunc(func(before any) (any, *State, error) {
+	split.SetDoFunc(func(data DataToBeVerified) (DataToBeVerified, error) {
 		fmt.Fprint(os.Stdout, "S")
+
 		switch rand.Intn(2) {
 		case 0:
-			return before, road1, nil
+			data.NextState = road1State
 		case 1:
-			return before, road2, nil
+			data.NextState = road2State
 		}
-		return nil, nil, errors.New("strange")
+		return data, nil
 	})
 
-	road1.SetDoFunc(func(data any) (any, *State, error) {
+	road1.SetDoFunc(func(data DataToBeVerified) (DataToBeVerified, error) {
 		fmt.Fprint(os.Stdout, "1")
-		return nil, nil, nil
+		return data, nil
 	})
 
-	road2.SetDoFunc(func(data any) (any, *State, error) {
+	road2.SetDoFunc(func(data DataToBeVerified) (DataToBeVerified, error) {
 		fmt.Fprint(os.Stdout, "2")
-		return nil, nil, nil
+		return data, nil
 	})
 
-	super.SetGenDataFunc(func() (any, *State, error) {
+	super.SetGenDataFunc(func() (DataToBeVerified, error) {
 		fmt.Fprint(os.Stdout, ">")
-		return 0, create, nil
+		return DataToBeVerified{
+			CurrentState: createState,
+			Data:         101,
+		}, nil
 	})
 
 	err = super.Add(create)
@@ -88,6 +99,5 @@ func TestStateRouter_Go(t *testing.T) {
 	err = super.Go(ctx)
 	require.NoError(t, err)
 
-	// todo: пока не работает, баг в момент shutdown блокируется  иногда
-	//	super.Wait()
+	super.Wait()
 }
